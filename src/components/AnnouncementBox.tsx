@@ -3,32 +3,62 @@ import type { Announcement } from "@/lib/types";
 import Merlin from "./Merlin";
 import Corvo from "./Corvo";
 
-export function MerlinBox({ announcements, season }: { announcements: Announcement[]; season: string }) {
-  const active = announcements.filter((a) => a.active);
+// Recuadros tal cual el Master: panel horizontal, sprite a la izquierda,
+// "MERLÍN DICE:" / "EL CUERVO DE RRHH DICE:" en pixel, chip de bono.
+// Solo se muestran los comunicados activos.
+function BonusChip({ a, actionLabel }: { a: Announcement; actionLabel?: string | null }) {
+  if (a.bonus_multiplier == null) return null;
   return (
-    <section className="pixel-card relative overflow-hidden rounded-2xl border-2 border-purple-400/50 bg-gradient-to-b from-purple-500/20 to-purple-900/20 p-4">
-      <div className="flex items-center gap-3"><Merlin season={season} size={88} /><div><h2 className="pixel-text text-xl font-black">MERLÍN</h2><p className="text-xs text-white/75">El mago del Master · bonos ×2 / ×3</p></div></div>
-      {active.length === 0 && <p className="mt-2 text-sm opacity-80">Merlín no tiene comunicados activos.</p>}
+    <p className="chip mt-2 inline-flex px-2.5 py-1 text-xs font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>
+      BONO ACTIVO: puntos ×{a.bonus_multiplier}
+      {actionLabel ? ` en «${actionLabel}»` : " en todas las acciones"}
+    </p>
+  );
+}
+
+export function MerlinBox({ announcements, season, actionLabel }: { announcements: Announcement[]; season: string; actionLabel?: (id: number | null) => string | null }) {
+  const active = announcements.filter((a) => a.active);
+  if (active.length === 0) return null;
+  return (
+    <section aria-label="Comunicados de Merlín" className="flex flex-col gap-3">
       {active.map((a) => (
-        <article key={a.id} className="mt-3 rounded-xl border border-purple-300/30 bg-black/40 p-3">
-          <b className="text-yellow-200">{a.title}</b><p className="text-sm">{a.body}</p>
-          {a.bonus_multiplier && <p className="mt-1 inline-block rounded-full bg-yellow-400 px-2 py-0.5 text-xs font-black text-black">Bono ×{a.bonus_multiplier} {a.bonus_action_id ? "en una acción" : "en todas las acciones"}</p>}
+        <article key={a.id} className="panel flex items-start gap-3 p-4" style={{ borderColor: "#6d4fc2" }}>
+          <span className="flex shrink-0 flex-col items-center gap-1">
+            <span className="sprite-bob inline-block">
+              <Merlin season={season} size={56} caption={false} />
+            </span>
+            {season === "navidad" && (
+              <span className="text-2xl leading-none" aria-hidden>🛷🎁🎄</span>
+            )}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="font-pixel text-[10px]" style={{ color: "#6d4fc2" }}>MERLÍN DICE:</p>
+            <h3 className="mt-1.5 text-base font-bold text-[var(--text)]">{a.title}</h3>
+            {a.body && <p className="mt-1 text-sm text-[var(--dim)]">{a.body}</p>}
+            <BonusChip a={a} actionLabel={actionLabel ? actionLabel(a.bonus_action_id) : null} />
+          </div>
         </article>
       ))}
     </section>
   );
 }
 
-export function CorvoBox({ announcements, season }: { announcements: Announcement[]; season: string }) {
+export function CorvoBox({ announcements, season, actionLabel }: { announcements: Announcement[]; season: string; actionLabel?: (id: number | null) => string | null }) {
   const active = announcements.filter((a) => a.active);
+  if (active.length === 0) return null;
   return (
-    <section className="pixel-card relative overflow-hidden rounded-2xl border-2 border-slate-400/50 bg-gradient-to-b from-slate-500/20 to-slate-900/25 p-4">
-      <div className="flex items-center gap-3"><Corvo season={season} size={88} /><div><h2 className="pixel-text text-xl font-black">EL CUERVO DE RRHH · CORVO</h2><p className="text-xs text-white/75">Recuadro aparte de Merlín · bonos ×2 / ×3</p></div></div>
-      {active.length === 0 && <p className="mt-2 text-sm opacity-80">Corvo no tiene comunicados activos.</p>}
+    <section aria-label="Comunicados del Cuervo de RRHH" className="flex flex-col gap-3">
       {active.map((a) => (
-        <article key={a.id} className="mt-3 rounded-xl border border-slate-300/30 bg-black/40 p-3">
-          <b className="text-sky-200">{a.title}</b><p className="text-sm">{a.body}</p>
-          {a.bonus_multiplier && <p className="mt-1 inline-block rounded-full bg-yellow-400 px-2 py-0.5 text-xs font-black text-black">Bono ×{a.bonus_multiplier} {a.bonus_action_id ? "en una acción" : "en todas las acciones"}</p>}
+        <article key={a.id} className="panel flex items-start gap-3 p-4" style={{ borderColor: "#3d4fa3" }}>
+          <span className="sprite-bob inline-block shrink-0">
+            <Corvo season={season} size={60} caption={false} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="font-pixel text-[10px]" style={{ color: "#3d4fa3" }}>EL CUERVO DE RRHH DICE:</p>
+            <h3 className="mt-1.5 text-base font-bold text-[var(--text)]">{a.title}</h3>
+            {a.body && <p className="mt-1 text-sm text-[var(--dim)]">{a.body}</p>}
+            <BonusChip a={a} actionLabel={actionLabel ? actionLabel(a.bonus_action_id) : null} />
+          </div>
         </article>
       ))}
     </section>

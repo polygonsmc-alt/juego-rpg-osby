@@ -1,37 +1,70 @@
 "use client";
-import { useEffect, useState } from "react";
-import type { Prize, Collaborator } from "@/lib/types";
+import type { Prize, Redemption } from "@/lib/types";
 import { premioMayor } from "@/lib/data";
 
-export default function PrizeCard({ prize, prizes, leader }: { prize: Prize; prizes: Prize[]; leader: Collaborator | null }) {
+// Tarjeta de premio tal cual el Master: panel, icono a la izquierda,
+// costo en pixel, chip de stock, caja "SOLICITAR CANJE EN RRHH" en pixel.
+// Sin barra de progreso (el Master no la tiene).
+// El letrero "¡TE LO GANARON!" solo aparece si el stock llegó a 0.
+const PRIZE_ICON: Record<number, string> = {
+  1: "🎫", 2: "🎬", 3: "🎮", 4: "📱", 5: "📺", 6: "🕹️",
+};
+
+export default function PrizeCard({ prize, prizes, redemptions }: { prize: Prize; prizes: Prize[]; redemptions?: Redemption[] }) {
   const mayor = premioMayor(prizes);
-  const isMayor = mayor?.id === prize.id;
+  const isTop = mayor?.id === prize.id;
   const out = prize.stock <= 0;
-  const leaderPoints = leader?.points ?? 0;
-  const pct = Math.min(100, Math.round((leaderPoints / prize.cost) * 100));
-  const falta = Math.max(0, prize.cost - leaderPoints);
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
+  const claims = (redemptions || []).filter((r) => r.prize_id === prize.id && r.status === "approved");
+  const latestClaim = claims[0] ?? null;
   return (
     <article
       data-disponibles={prize.stock}
-      className={`pixel-card rounded-2xl border p-4 transition-transform hover:-translate-y-1 ${isMayor ? "animate-gold-glow border-yellow-400 bg-gradient-to-b from-yellow-400/20 to-yellow-600/10" : "border-white/20 bg-white/5"}`}
+      className={`panel flex flex-col p-4 ${isTop ? "panel-gold" : ""}`}
+      aria-label={isTop ? `${prize.name}, premio mayor, ${prize.cost.toLocaleString("es-MX")} puntos, ${prize.stock > 0 ? `${prize.stock} disponibles` : "agotado"}` : `${prize.name}, ${prize.cost.toLocaleString("es-MX")} puntos, ${prize.stock > 0 ? `${prize.stock} disponibles` : "agotado"}`}
     >
-      {isMayor && <div className="gold-banner mb-2 inline-block rounded px-2 py-1 text-xs font-black text-black">★ PREMIO MAYOR ★</div>}
-      <div className="flex items-start justify-between gap-2">
-        <h3 className="font-black">{prize.name}</h3>
-        <span className="text-2xl" aria-hidden>{isMayor ? "🎮🏆" : "🎁"}</span>
+      {isTop && (
+        <div className="mb-3 flex items-center justify-center gap-2 rounded-md border-2 px-2 py-1.5" style={{ borderColor: "#b8860b", background: "#f5b81e" }}>
+          <span aria-hidden="true" className="text-[13px] leading-none text-[#4a3200]">★</span>
+          <span className="font-pixel text-center text-[10px] leading-relaxed text-[#4a3200]">PREMIO MAYOR</span>
+          <span aria-hidden="true" className="text-[13px] leading-none text-[#4a3200]">★</span>
+        </div>
+      )}
+      {out && latestClaim && (
+        <div className="mb-3 rounded-md border-2 px-3 py-2 text-center" style={{ borderColor: "var(--green)", background: "var(--surface-alt)" }} role="status">
+          <p className="font-pixel text-[10px] leading-relaxed text-[var(--text)]">¡TE LO GANARON! · OBJETO CANJEADO</p>
+          <p className="mt-1 text-xs font-semibold text-[var(--text)]">{latestClaim.prize_name} ya fue canjeado</p>
+        </div>
+      )}
+      {out && (
+        <div className="mb-3 rounded-md border-2 px-3 py-2 text-center" style={{ borderColor: "var(--red)", background: "var(--surface-alt)" }} role="status">
+          <p className="font-pixel text-[10px] leading-relaxed" style={{ color: "var(--red)" }}>AGOTADO</p>
+          <p className="mt-1 text-xs font-semibold text-[var(--text)]">Ya no quedan unidades de este premio.</p>
+        </div>
+      )}
+      <div className="flex items-start gap-3">
+        <span className={isTop ? "inline-flex shrink-0 rounded-lg border-2 border-[#e6a817] bg-white/60 p-1 shadow-[0_0_12px_rgba(245,184,30,0.65)] dark:bg-black/20" : "inline-flex shrink-0"}>
+          <span className="leading-none" style={{ fontSize: isTop ? 56 : 52 }}>{PRIZE_ICON[prize.id] || "🎁"}</span>
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-base font-bold text-[var(--text)]">{prize.name}</h3>
+          <p className={`font-pixel mt-1 text-[11px] ${isTop ? "prize-gold-cost" : ""}`} style={isTop ? undefined : { color: "var(--accent)" }}>
+            {prize.cost.toLocaleString("es-MX")} PTS
+          </p>
+          <p className="chip mt-2 inline-flex px-2.5 py-1 text-xs font-bold" style={prize.stock > 0 ? { color: "var(--green)", borderColor: "var(--green)" } : { color: "var(--red)", borderColor: "var(--red)" }}>
+            {prize.stock > 0 ? `Disponibles: ${prize.stock.toLocaleString("es-MX")}` : "Agotado · Disponibles: 0"}
+          </p>
+          {isTop && <p className="mt-1 text-xs font-semibold text-[var(--text)]">El premio más especial de la carrera</p>}
+        </div>
       </div>
-      <p className="text-lg font-bold">{prize.cost.toLocaleString("es-MX")} PTS</p>
-      <p className={`mt-1 inline-block rounded-full px-2 py-0.5 text-sm font-bold ${out ? "bg-red-500/30 text-red-200" : "bg-emerald-500/25 text-emerald-200"}`}>
-        {out ? "Agotado" : `Disponibles: ${prize.stock}`}
+      <p className="mt-4 rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2.5 text-center font-pixel text-[10px] leading-relaxed text-[var(--text)]" role="note">
+        SOLICITAR CANJE EN RRHH
       </p>
-      <div className="mt-3 h-3 overflow-hidden rounded-full bg-white/10" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-        <div className={`animate-fill h-full ${isMayor ? "bg-yellow-400" : "bg-emerald-400"}`} style={{ width: mounted ? `${pct}%` : "0%" }} />
-      </div>
-      <p className="mt-1 text-xs opacity-80">{pct}% — {falta === 0 ? "¡Ya lo puedes pedir en RRHH!" : `Faltan ${falta.toLocaleString("es-MX")} pts`}</p>
-      <p className={`mt-3 rounded-lg py-2 text-center text-sm font-black tracking-wide ${out ? "bg-red-500/25 text-red-200" : isMayor ? "bg-yellow-400 text-black" : "bg-white/10"}`}>
-        {out ? "¡TE LO GANARON! OBJETO CANJEADO" : "SOLICITAR CANJE EN RRHH"}
+      <p className="mt-2 text-center text-xs text-[var(--dim)]">
+        {out
+          ? "Agotado: aunque te alcancen los puntos, ya no se puede canjear hasta que haya más unidades."
+          : latestClaim
+            ? `Este objeto ya fue canjeado y quedan ${prize.stock.toLocaleString("es-MX")} disponible${prize.stock === 1 ? "" : "s"}. Si te alcanza para otro premio, pídelo en RRHH.`
+            : "Sin botones aquí: el canje lo hace RRHH / el Master en persona."}
       </p>
     </article>
   );

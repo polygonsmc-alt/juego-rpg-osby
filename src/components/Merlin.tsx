@@ -1,7 +1,7 @@
 "use client";
 // Merlín barbón pixel: sombrero puntiagudo, barba blanca larga, bastón.
 // En Navidad: gorro de Santa + túnica roja + trineo con regalos. En Halloween: sombrero de bruja morado/naranja.
-export default function Merlin({ season = "navidad", size = 96 }: { season?: string; size?: number }) {
+export default function Merlin({ season = "navidad", size = 96, caption = true, sleigh = false }: { season?: string; size?: number; caption?: boolean; sleigh?: boolean }) {
   const isNavidad = season === "navidad";
   const isHalloween = season === "halloween";
   const hat = isNavidad ? "#d7263d" : isHalloween ? "#7c3aed" : "#4a3aff";
@@ -29,13 +29,22 @@ export default function Merlin({ season = "navidad", size = 96 }: { season?: str
           <div key={`${y}-${x}`} style={{ width: px, height: px, background: colors[ch] || "transparent" }} />
         )))}
       </div>
-      {/* Trineo con regalos — se desliza */}
-      <div className="animate-sled mt-1 text-center text-2xl leading-none" aria-hidden>
-        🛷<span className="text-lg">🎁🎁🎄</span>
-      </div>
-      <p style={{ fontSize: 11, textAlign: "center", marginTop: 4 }}>
-        🧙 Merlín {isNavidad ? "🎅 con trineo y regalos" : isHalloween ? "🎃 brujo" : ""}
-      </p>
+      {/* Trineo con regalos (solo en el recuadro de Merlín, debajo del mago) */}
+      {sleigh && isNavidad && (
+        <div className="mt-1 text-center text-2xl leading-none" aria-hidden>
+          🛷<span className="text-lg">🎁🎁🎄</span>
+        </div>
+      )}
+      {caption && (
+        <>
+          <div className="animate-sled mt-1 text-center text-2xl leading-none" aria-hidden>
+            🛷<span className="text-lg">🎁🎁🎄</span>
+          </div>
+          <p style={{ fontSize: 11, textAlign: "center", marginTop: 4 }}>
+            🧙 Merlín {isNavidad ? "🎅 con trineo y regalos" : isHalloween ? "🎃 brujo" : ""}
+          </p>
+        </>
+      )}
     </div>
   );
 }

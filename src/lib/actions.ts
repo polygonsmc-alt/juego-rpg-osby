@@ -1,7 +1,14 @@
 "use server";
-import { supabaseAdmin } from "./supabase";
+import { supabaseAdmin, isSupabaseConfigured } from "./supabase";
 import { bestBonus } from "./data";
 import type { Announcement } from "./types";
+
+// Si Supabase no está configurado (sin env vars en Vercel), el cliente
+// apunta a un placeholder y NADA se guardaría. Mejor fallar con un error
+// claro que el Master muestra en rojo, que fallar en silencio.
+function notConfigured() {
+  return { ok: false as const, error: "supabase_no_configurado" };
+}
 
 /** Reglas de negocio (lado servidor, con service role).
  *  - Un solo numero de puntos.
@@ -23,6 +30,7 @@ async function getBonuses() {
 }
 
 export async function awardPoints(collaboratorId: number, actionId: number, label: string, basePoints: number) {
+  if (!isSupabaseConfigured) return notConfigured();
   const db = supabaseAdmin();
   const { merlin, corvo } = await getBonuses();
   const bonus = bestBonus(merlin, corvo, actionId);
@@ -39,6 +47,7 @@ export async function awardPoints(collaboratorId: number, actionId: number, labe
 }
 
 export async function deductPoints(collaboratorId: number, label: string, points: number, reason?: string) {
+  if (!isSupabaseConfigured) return notConfigured();
   const db = supabaseAdmin();
   const { data: coll } = await db.from("collaborators").select("points").eq("id", collaboratorId).single();
   if (!coll) return { ok: false, error: "colaborador no encontrado" };
@@ -51,6 +60,7 @@ export async function deductPoints(collaboratorId: number, label: string, points
 }
 
 export async function directRedeem(collaboratorId: number, prizeId: number) {
+  if (!isSupabaseConfigured) return notConfigured();
   const db = supabaseAdmin();
   const { data: prize } = await db.from("prizes").select("*").eq("id", prizeId).single();
   if (!prize) return { ok: false, error: "premio no encontrado" };
@@ -73,6 +83,7 @@ export async function directRedeem(collaboratorId: number, prizeId: number) {
 }
 
 export async function undoEvent(eventId: number) {
+  if (!isSupabaseConfigured) return notConfigured();
   const db = supabaseAdmin();
   const { data: ev } = await db.from("point_events").select("*").eq("id", eventId).single();
   if (!ev) return { ok: false, error: "evento no encontrado" };

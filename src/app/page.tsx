@@ -1,14 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, THEMES } from "@/lib/data";
+import { COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, ACTIONS, nextLevel } from "@/lib/data";
 import type { GameState, Collaborator } from "@/lib/types";
 import Podium from "@/components/Podium";
-import Track, { Snowfall } from "@/components/Track";
+import Track from "@/components/Track";
 import PrizeCard from "@/components/PrizeCard";
 import { MerlinBox, CorvoBox } from "@/components/AnnouncementBox";
 import PixelAvatar from "@/components/PixelAvatar";
-import { levelFor } from "@/lib/data";
+import TierBadge from "@/components/TierBadge";
 
 const SEED_STATE: GameState = {
   collaborators: COLLABORATORS_SEED,
@@ -19,6 +19,17 @@ const SEED_STATE: GameState = {
   crow_announcements: CORVO_SEED,
   settings: SETTINGS_SEED,
 };
+
+const fmt = (n: number) => n.toLocaleString("es-MX");
+
+function timeAgo(iso: string) {
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "ahora mismo";
+  if (mins < 60) return `hace ${mins} min`;
+  const h = Math.floor(mins / 60);
+  if (h < 24) return `hace ${h} h`;
+  return `hace ${Math.floor(h / 24)} d`;
+}
 
 export default function LaCarrera() {
   const [state, setState] = useState<GameState>(SEED_STATE);
@@ -64,82 +75,139 @@ export default function LaCarrera() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const theme = THEMES[state.settings.theme] || THEMES.bosque;
-  const sorted = [...state.collaborators].sort((a, b) => b.points - a.points);
-  const leader = sorted[0] || null;
-  const isNavidad = state.settings.season === "navidad";
+  const sorted = [...state.collaborators].sort((a, b) => b.points - a.points || a.id - b.id);
+  const actionLabel = (id: number | null) => {
+    if (id == null) return null;
+    return ACTIONS.find((a) => a.id === id)?.label ?? null;
+  };
 
   return (
-    <main style={{ background: `linear-gradient(180deg, #071a10 0%, ${theme.bg} 30%, #071a10 100%)` }} className="relative min-h-screen overflow-hidden p-4 text-white md:p-6">
-      {isNavidad && (
-        <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden" aria-hidden>
-          <Snowfall />
-        </div>
-      )}
-      <header className="relative z-10 mx-auto max-w-6xl text-center">
-        <div className="mx-auto mb-2 flex h-16 w-16 items-center justify-center rounded-2xl border-2 border-yellow-400/60 bg-black/40 text-3xl shadow-[0_0_20px_rgba(245,215,110,.35)]" aria-hidden>🎮</div>
-        <h1 className="pixel-text text-2xl font-black tracking-wide md:text-4xl">{state.settings.company_name}</h1>
-        <p className="mt-1 font-bold text-yellow-200">🎮 Juego RPG de Metas — La Carrera {live ? "· en vivo" : "· vista de ejemplo (configura Supabase)"}</p>
-        <p className="text-sm opacity-80">Tema {theme.label} · Temporada {state.settings.season} · Solo visual — para canjear, ve a RRHH</p>
-        <a href="/master" className="mt-3 inline-block rounded-full border border-white/30 bg-white/10 px-4 py-1.5 text-sm font-bold underline">Ir al Panel Master →</a>
-      </header>
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]" data-theme={state.settings.theme} data-season={state.settings.season}>
+      <main className="mx-auto w-full max-w-6xl px-3 pb-10 pt-4 sm:px-4">
+        {/* Nombre y logo de la empresa (Master) */}
+        {(state.settings.company_name || state.settings.logo_url) && (
+          <div className="mb-5 flex items-center gap-3">
+            {state.settings.logo_url && (
+              <img src={state.settings.logo_url} alt={`Logo de ${state.settings.company_name ?? "la empresa"}`} className="h-12 w-auto max-w-40 rounded-md border-2 border-[var(--border)] bg-[var(--surface)] object-contain p-1" />
+            )}
+            {state.settings.company_name && (
+              <p className="font-pixel text-base text-[var(--text)] sm:text-lg">{state.settings.company_name}</p>
+            )}
+          </div>
+        )}
 
-      <div className="relative z-10 mx-auto mt-6 max-w-6xl space-y-6">
-        <Podium collaborators={state.collaborators} />
-
-        <section className="pixel-card rounded-2xl border-2 border-white/20 bg-black/40 p-4">
-          <h2 className="text-lg font-black">Canjes realizados</h2>
-          {state.redemptions.length === 0 ? (
-            <p>Aún no hay canjes, ¡sé el primero en llegar a un premio!</p>
-          ) : (
-            <ul className="list-disc pl-5">
-              {state.redemptions.map((r) => {
-                const who = state.collaborators.find((c) => c.id === r.collaborator_id);
-                return <li key={r.id}>{who?.name} canjeó {r.prize_name} ({r.cost} pts), {new Date(r.created_at).toLocaleString("es-MX")}</li>;
-              })}
-            </ul>
-          )}
-        </section>
-
-        <Track collaborators={state.collaborators} season={state.settings.season} />
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <MerlinBox announcements={state.announcements} season={state.settings.season} />
-          <CorvoBox announcements={state.crow_announcements} season={state.settings.season} />
+        {/* Cambio de vista (Master) */}
+        <div className="panel mb-5 flex p-1.5" role="tablist" aria-label="Cambiar vista">
+          <a href="/" role="tab" aria-selected="true" className="min-h-11 flex-1 rounded-md px-3 py-2 text-center font-pixel text-[11px] sm:text-xs" style={{ background: "var(--accent)", color: "#14161f" }}>LA CARRERA</a>
+          <a href="/master" role="tab" aria-selected="false" className="min-h-11 flex-1 rounded-md px-3 py-2 text-center font-pixel text-[11px] text-[var(--text)] sm:text-xs">PANEL MASTER</a>
         </div>
 
-        <section>
-          <h2 className="pixel-text mb-3 text-xl font-black">🏆 Ranking</h2>
-          <div className="grid gap-3">
-            {sorted.map((c, i) => (
-              <div key={c.id} className="pixel-card flex items-center gap-3 rounded-xl border border-white/15 bg-white/5 p-3">
-                <span className="w-8 text-xl font-black">{i + 1}°</span>
-                <PixelAvatar sprite={c.sprite} size={48} label={c.name} />
-                <div><b>{c.name}</b><div className="text-sm opacity-80">{c.points} PTS · Nivel {levelFor(c.points)}</div></div>
+        {!live && (
+          <p className="mb-5 rounded-md border-2 border-dashed border-[var(--border)] px-4 py-3 text-sm text-[var(--dim)]">
+            🎮 Juego RPG de Metas — La Carrera · vista de ejemplo (configura Supabase) · Solo visual — para canjear, ve a RRHH
+          </p>
+        )}
+
+        <div className="flex flex-col gap-6">
+          <Podium collaborators={state.collaborators} />
+
+          {/* Canjes realizados */}
+          <section aria-label="Canjes realizados: objetos canjeados" className="panel p-4 sm:p-5" style={{ borderColor: "var(--green)" }}>
+            <h2 className="font-pixel text-sm text-[var(--text)] sm:text-base">CANJES REALIZADOS</h2>
+            <p className="mt-1 text-xs font-bold text-[var(--dim)]">OBJETOS CANJEADOS</p>
+            {state.redemptions.length === 0 ? (
+              <p className="mt-3 text-sm font-semibold text-[var(--text)]">Aún no hay canjes, ¡sé el primero en llegar a un premio!</p>
+            ) : (
+              <ul className="mt-3 flex flex-col gap-2">
+                {state.redemptions.slice(0, 6).map((r) => {
+                  const who = state.collaborators.find((c) => c.id === r.collaborator_id);
+                  return (
+                    <li key={r.id} className="rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2.5 text-sm">
+                      <span className="font-bold text-[var(--text)]">{who?.name ?? "Alguien"}</span>{" "}
+                      <span className="text-[var(--dim)]">canjeó</span>{" "}
+                      <span className="font-bold text-[var(--text)]">{r.prize_name}</span>{" "}
+                      <span className="text-[var(--dim)]">({fmt(r.cost)} pts)</span>
+                      <span className="block text-xs text-[var(--dim)]">{new Date(r.resolved_at ?? r.created_at).toLocaleString("es-MX")}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <p className="mt-3 text-xs text-[var(--dim)]">
+              ¿Ya te alcanza para un premio? Pídelo en persona: <strong className="text-[var(--text)]">solicitar canje en RRHH</strong>. Solo el Master registra el canje y descuenta los puntos.
+            </p>
+          </section>
+
+          <MerlinBox announcements={state.announcements} season={state.settings.season} actionLabel={actionLabel} />
+          <CorvoBox announcements={state.crow_announcements} season={state.settings.season} actionLabel={actionLabel} />
+
+          <Track collaborators={state.collaborators} prizes={state.prizes} season={state.settings.season} />
+
+          <div className="grid gap-6 lg:grid-cols-5">
+            {/* Ranking + Actividad */}
+            <section aria-label="Ranking" className="lg:col-span-2">
+              <h2 className="font-pixel mb-3 text-sm text-[var(--text)]">RANKING</h2>
+              <ol className="panel flex flex-col divide-y-2 divide-[var(--border)]">
+                {sorted.map((p, i) => {
+                  const next = [...state.prizes].sort((a, b) => a.cost - b.cost).find((pr) => pr.cost > p.points) ?? null;
+                  const upcoming = nextLevel(p.points);
+                  return (
+                    <li key={p.id} className="flex items-center gap-3 px-4 py-3">
+                      <span className="font-pixel w-7 shrink-0 text-center text-xs" style={{ color: i === 0 ? "var(--gold)" : i === 1 ? "#9aa5b1" : i === 2 ? "#e08a4c" : "var(--dim)" }}>{i + 1}</span>
+                      <PixelAvatar sprite={p.sprite} size={34} label={p.name} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-bold text-[var(--text)]">{p.name}</p>
+                        <p className="text-xs text-[var(--dim)]">
+                          {next ? `A ${fmt(next.cost - p.points)} pts de: ${next.name}` : "¡Ya le alcanza para el premio mayor!"}
+                          {upcoming ? ` · Evoluciona a ${upcoming.name} en ${fmt(upcoming.min)}` : " · Nivel máximo"}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="font-pixel text-[11px] text-[var(--text)]">{fmt(p.points)}</p>
+                        <TierBadge points={p.points} />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+
+              {state.events.length > 0 && (
+                <>
+                  <h2 className="font-pixel mb-3 mt-6 text-sm text-[var(--text)]">ACTIVIDAD</h2>
+                  <ul className="panel flex flex-col divide-y divide-[var(--border)]">
+                    {state.events.slice(0, 8).map((e) => {
+                      const who = state.collaborators.find((c) => c.id === e.collaborator_id);
+                      return (
+                        <li key={e.id} className="px-4 py-2.5 text-sm">
+                          <span className="font-semibold text-[var(--text)]">{who?.name ?? ""}</span>{" "}
+                          <span className={`text-[var(--dim)] ${e.reversed ? "line-through" : ""}`}>{e.label}</span>{" "}
+                          {e.reversed && <span className="font-bold" style={{ color: "var(--red)" }}>(deshecho) </span>}
+                          <span className="font-bold" style={{ color: e.points >= 0 ? "var(--green)" : "var(--red)" }}>
+                            {e.points >= 0 ? "+" : ""}{fmt(e.points)}
+                          </span>
+                          <span className="block text-xs text-[var(--dim)]">{timeAgo(e.created_at)}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
+              )}
+            </section>
+
+            {/* Premios: solo visual */}
+            <section aria-label="Premios" className="lg:col-span-3">
+              <h2 className="font-pixel mb-3 text-sm text-[var(--text)]">PREMIOS</h2>
+              <p className="mb-4 rounded-md border-2 border-dashed border-[var(--border)] px-4 py-3 text-sm text-[var(--dim)]">
+                Esta vista es solo para ver. Cuando te alcance para un premio, pídelo en persona:{" "}
+                <strong className="text-[var(--text)]">solicitar canje en RRHH</strong>. Aquí no se toca nada: solo el Master registra el canje y descuenta los puntos.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {state.prizes.map((p) => <PrizeCard key={p.id} prize={p} prizes={state.prizes} redemptions={state.redemptions} />)}
               </div>
-            ))}
+            </section>
           </div>
-        </section>
-
-        <section>
-          <h2 className="pixel-text mb-3 text-xl font-black">🎁 Premios</h2>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {state.prizes.map((p) => <PrizeCard key={p.id} prize={p} prizes={state.prizes} leader={leader} />)}
-          </div>
-          <p className="mt-2 text-sm opacity-70">Vista totalmente visual: sin botones ni selectores. Cada premio solo dice “SOLICITAR CANJE EN RRHH”.</p>
-        </section>
-
-        <section className="pixel-card rounded-2xl border border-white/15 bg-black/40 p-4">
-          <h2 className="text-lg font-black">Actividad reciente</h2>
-          {state.events.length === 0 ? <p className="text-sm opacity-70">Aún no hay movimientos. Todos empiezan en 0 pts.</p> : (
-            <ul className="space-y-1 text-sm">
-              {state.events.slice(0, 10).map((e) => (
-                <li key={e.id}>{e.label} — {e.points > 0 ? `+${e.points}` : e.points} pts {e.bonus_from ? `(bono de ${e.bonus_from})` : ""} {e.reversed ? "· DESHECHO" : ""}</li>
-              ))}
-            </ul>
-          )}
-        </section>
-      </div>
-    </main>
+        </div>
+      </main>
+    </div>
   );
 }

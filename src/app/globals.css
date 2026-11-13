@@ -1,153 +1,169 @@
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: dark; }
+/* ===== Juego RPG — sistema de temas del Master de Muse (tal cual) ===== */
+:root { color-scheme: light dark; }
 body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+.font-pixel { font-family: "Press Start 2P", ui-monospace, monospace; }
 .pixel { image-rendering: pixelated; }
 
-/* ===== Juego RPG — Bosque + Navidad (igual que el Master de Muse) ===== */
+/* Vars base (claro) + tema Bosque + temporada Navidad = lo que se ve hoy */
 :root {
-  --bosque-bg: #0a1f14;
-  --bosque-bg2: #0f2a1d;
-  --bosque-track: #1d4d2b;
-  --bosque-track-dark: #143a20;
-  --bosque-ground: #5b3a1e;
-  --bosque-ground2: #7a4e2a;
-  --bosque-sky: #0e3a24;
-  --bosque-sky2: #123f2c;
-  --gold: #f5d76e;
-  --gold-deep: #d4a017;
+  --bg: #e9f2ec; --surface: #fbfdfe; --surface-alt: #e2efe4;
+  --text: #1d2b1c; --dim: #55704f; --border: #a8c8ab;
+  --accent: #c1272d; --gold: #f5b81e; --green: #1d9e4b; --red: #d93a36;
+  --track: #dcefe2; --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101b12; --surface: #1a2a1e; --surface-alt: #243826;
+    --text: #e8f2e4; --dim: #9db894; --border: #3f6b47;
+    --accent: #ff6b5e; --green: #3ecf6e; --red: #ef5350; --track: #0b130c;
+  }
+}
+[data-theme="bosque"] {
+  --bg: #e2efe0; --surface: #f4faf1; --surface-alt: #e0eedd; --text: #1d2b1c;
+  --dim: #55704f; --border: #a9c39b; --accent: #2e7d32; --track: #cfe3c8;
+}
+[data-theme="oceano"] {
+  --bg: #dfeef5; --surface: #f2f9fc; --surface-alt: #ddeef7; --text: #16283a;
+  --dim: #4d6a82; --border: #9dbfd4; --accent: #0b6fa4; --track: #c8e2ef;
+}
+[data-theme="atardecer"] {
+  --bg: #f7e8dd; --surface: #fdf4ec; --surface-alt: #f6e2cf; --text: #33221a;
+  --dim: #7d5c4c; --border: #dbb096; --accent: #c2510a; --track: #f0d7c2;
+}
+[data-theme="neon"] {
+  --bg: #e6e2f5; --surface: #f5f2ff; --surface-alt: #e4dbfa; --text: #221a3d;
+  --dim: #5f5490; --border: #b3a4e0; --accent: #7c3aed; --track: #d5cdf2;
+}
+@media (prefers-color-scheme: dark) {
+  [data-theme="bosque"] {
+    --bg: #101a10; --surface: #1a291a; --surface-alt: #22351f; --text: #e8f2e4;
+    --dim: #9db894; --border: #3c5a36; --accent: #7ed492; --track: #0a120a;
+  }
+  [data-theme="oceano"] {
+    --bg: #0d1622; --surface: #16222f; --surface-alt: #1d2d3f; --text: #e6f2f9;
+    --dim: #93aec2; --border: #33506b; --accent: #4fc3e8; --track: #081019;
+  }
+  [data-theme="atardecer"] {
+    --bg: #1d130e; --surface: #2a1c14; --surface-alt: #37251a; --text: #f7e9dd;
+    --dim: #bd9a85; --border: #5f4230; --accent: #ff9a52; --track: #150c07;
+  }
+  [data-theme="neon"] {
+    --bg: #0d0a1a; --surface: #171231; --surface-alt: #201842; --text: #efeaff;
+    --dim: #a79fd0; --border: #453a7d; --accent: #c084fc; --track: #070512;
+  }
+}
+/* Temporadas: Navidad manda sobre el tema (es la actual) */
+[data-season="navidad"] {
+  --bg: #e9f2ec; --surface: #fbfdfe; --surface-alt: #e2efe4; --border: #a8c8ab;
+  --accent: #c1272d; --track: #dcefe2;
+}
+[data-season="halloween"] {
+  --bg: #f3e9dc; --surface: #fbf3e6; --surface-alt: #f3e3cb; --border: #d9b98c;
+  --accent: #d96c06; --track: #eeddc4;
+}
+[data-season="primavera"] {
+  --bg: #fdeef4; --surface: #fff7fa; --surface-alt: #fbe0ec; --border: #e5b7cd;
+  --accent: #c2255c; --track: #f6dcea;
+}
+[data-season="verano"] {
+  --bg: #fdf3d8; --surface: #fffaf0; --surface-alt: #fcebbe; --border: #e3cd8a;
+  --accent: #d97c06; --track: #f7e7b5;
+}
+@media (prefers-color-scheme: dark) {
+  [data-season="navidad"] {
+    --bg: #101b12; --surface: #1a2a1e; --surface-alt: #243826; --border: #3f6b47;
+    --accent: #ff6b5e; --track: #0b130c;
+  }
+  [data-season="halloween"] {
+    --bg: #150f1c; --surface: #201631; --surface-alt: #2a1d40; --text: #f3e9f7;
+    --dim: #b39dc4; --border: #4a3566; --accent: #ff8c1a; --track: #0d0813;
+  }
+  [data-season="primavera"] {
+    --bg: #1c1218; --surface: #291a22; --surface-alt: #35222d; --border: #59324a;
+    --accent: #f783ac; --track: #120a0e;
+  }
+  [data-season="verano"] {
+    --bg: #191407; --surface: #261d0c; --surface-alt: #33270f; --border: #5c4a1e;
+    --accent: #ffc94d; --track: #100b03;
+  }
 }
 
-/* ---- Nieve cayendo ---- */
-@keyframes snowfall {
-  0% { transform: translateY(-12vh) translateX(0) rotate(0deg); opacity: 0; }
-  8% { opacity: 1; }
-  50% { transform: translateY(45vh) translateX(18px) rotate(180deg); }
-  100% { transform: translateY(105vh) translateX(-12px) rotate(360deg); opacity: 0.9; }
+/* Nieve cayendo DENTRO de la pista (Master): 14 copos cuadrados blancos */
+@keyframes snow-fall {
+  0% { transform: translateY(-6px); opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { transform: translateY(340px); opacity: 0; }
 }
-.snowflake {
-  position: absolute;
-  top: -8vh;
-  color: #fff;
-  text-shadow: 0 0 6px rgba(255,255,255,.9);
-  animation: snowfall linear infinite;
-  pointer-events: none;
-  z-index: 5;
+.snow-flake { animation: snow-fall linear infinite; }
+
+/* Panel arcade del Master: borde duro + sombra desplazada, sin blur */
+.panel {
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 4px 4px 0 rgba(20, 22, 31, 0.18);
 }
-@keyframes snow-drift {
-  0%, 100% { transform: translateX(0); }
-  50% { transform: translateX(10px); }
+.chip {
+  border: 2px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-alt);
 }
 
-/* ---- Corredor caminando / bob ---- */
-@keyframes walk-bob {
-  0%, 100% { transform: translateY(0) rotate(-1.5deg); }
-  50% { transform: translateY(-5px) rotate(1.5deg); }
+/* Marco dorado del Premio Mayor (Master) */
+@keyframes gold-glow {
+  0%, 100% { box-shadow: 6px 6px 0 rgba(184, 134, 11, 0.32), 0 0 14px rgba(245, 184, 30, 0.45); }
+  50% { box-shadow: 6px 6px 0 rgba(184, 134, 11, 0.32), 0 0 28px rgba(245, 184, 30, 0.8); }
 }
-.animate-walk { animation: walk-bob .55s ease-in-out infinite; }
-@keyframes runner-enter {
-  from { transform: translateX(-8px); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
+.panel-gold {
+  border: 3px solid #e6a817;
+  background: linear-gradient(165deg, #fffbe6 0%, #fff3c4 48%, #ffe98a 100%);
+  box-shadow: 6px 6px 0 rgba(184, 134, 11, 0.32), 0 0 18px rgba(245, 184, 30, 0.55);
+  animation: gold-glow 2.4s ease-in-out infinite;
+  position: relative;
 }
-.animate-runner-enter { animation: runner-enter .8s ease-out both; }
+@media (prefers-color-scheme: dark) {
+  .panel-gold {
+    border-color: #f5b81e;
+    background: linear-gradient(165deg, #3a2f0a 0%, #4d3d0e 52%, #634d12 100%);
+    box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.45), 0 0 22px rgba(245, 184, 30, 0.5);
+  }
+}
+.prize-gold-cost { color: #9a6b00; }
+@media (prefers-color-scheme: dark) {
+  .prize-gold-cost { color: #ffd54a; }
+}
 
-/* ---- Trineo de Merlín deslizándose ---- */
-@keyframes sled-glide {
-  0% { transform: translateX(-6px) translateY(0); }
-  50% { transform: translateX(10px) translateY(-4px); }
-  100% { transform: translateX(-6px) translateY(0); }
+/* Caminata de los monitos (Master) */
+@keyframes sprite-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
 }
-.animate-sled { animation: sled-glide 3.2s ease-in-out infinite; }
+.sprite-bob { animation: sprite-bob 0.9s ease-in-out infinite; }
+@keyframes goal-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+.goal-pulse { animation: goal-pulse 1.6s ease-in-out infinite; transform-origin: bottom left; }
+
+/* Flotación suave de Merlín y balanceo de Corvo */
 @keyframes float-soft {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-6px); }
 }
 .animate-float { animation: float-soft 2.8s ease-in-out infinite; }
-
-/* ---- Corvo posado ---- */
 @keyframes corvo-sway {
   0%, 100% { transform: rotate(-2deg) translateY(0); }
   50% { transform: rotate(2deg) translateY(-3px); }
 }
 .animate-corvo { animation: corvo-sway 2.4s ease-in-out infinite; transform-origin: bottom center; }
-@keyframes corvo-blink {
-  0%, 92%, 100% { transform: scaleY(1); }
-  95% { transform: scaleY(.1); }
-}
 
-/* ---- Premio Mayor dorado ---- */
-@keyframes gold-glow {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(245,215,110,.9), 0 0 18px rgba(245,215,110,.45); }
-  50% { box-shadow: 0 0 0 3px rgba(245,215,110,1), 0 0 34px rgba(245,215,110,.85); }
+@media (prefers-reduced-motion: reduce) {
+  .sprite-bob, .goal-pulse, .snow-flake, .panel-gold, .animate-float, .animate-corvo { animation: none; }
+  .snow-flake { display: none; }
 }
-.animate-gold-glow { animation: gold-glow 1.8s ease-in-out infinite; }
-@keyframes gold-shine {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-.gold-banner {
-  background: linear-gradient(90deg, #b8860b, #f5d76e, #fff3b0, #f5d76e, #b8860b);
-  background-size: 200% 100%;
-  animation: gold-shine 2.5s linear infinite;
-}
-
-/* ---- Luces de pino / estrella ---- */
-@keyframes twinkle {
-  0%, 100% { opacity: .35; transform: scale(.8); }
-  50% { opacity: 1; transform: scale(1.25); }
-}
-.animate-twinkle { animation: twinkle 1.4s ease-in-out infinite; }
-@keyframes pine-sway {
-  0%, 100% { transform: rotate(-1deg); }
-  50% { transform: rotate(1deg); }
-}
-.animate-pine { animation: pine-sway 4s ease-in-out infinite; transform-origin: bottom center; }
-
-/* ---- Barras de progreso animadas al cargar ---- */
-@keyframes fill-in {
-  from { width: 0%; }
-}
-.animate-fill { animation: fill-in 1.2s cubic-bezier(.22,1,.36,1) both; }
-
-/* ---- Podio ---- */
-@keyframes podium-pop {
-  from { transform: translateY(10px) scale(.96); opacity: 0; }
-  to { transform: translateY(0) scale(1); opacity: 1; }
-}
-.animate-podium { animation: podium-pop .7s cubic-bezier(.22,1,.36,1) both; }
-@keyframes medal-shine {
-  0%, 100% { filter: brightness(1); }
-  50% { filter: brightness(1.35); }
-}
-.animate-medal { animation: medal-shine 2s ease-in-out infinite; }
-
-/* ---- Pista pixel ---- */
-.pixel-track {
-  background:
-    linear-gradient(180deg, var(--bosque-sky) 0%, var(--bosque-sky2) 42%, #1a5c33 42%, #1d4d2b 58%, #2a6b3a 58%, #245c31 100%);
-}
-.track-ground {
-  background-image:
-    repeating-linear-gradient(90deg, rgba(0,0,0,.18) 0 12px, transparent 12px 24px),
-    linear-gradient(180deg, #7a4e2a, #5b3a1e 55%, #4a2f16);
-  border-top: 4px solid #2e1f0e;
-  border-bottom: 4px solid #2e1f0e;
-}
-.checker {
-  background-image:
-    linear-gradient(45deg, #111 25%, transparent 25%, transparent 75%, #111 75%),
-    linear-gradient(45deg, #111 25%, #fff 25%, #fff 75%, #111 75%);
-  background-size: 16px 16px;
-  background-position: 0 0, 8px 8px;
-}
-.checker-vertical {
-  background-image:
-    linear-gradient(45deg, #111 25%, transparent 25%, transparent 75%, #111 75%),
-    linear-gradient(45deg, #111 25%, #fff 25%, #fff 75%, #111 75%);
-  background-size: 14px 14px;
-  background-position: 0 0, 7px 7px;
-}
-.pixel-card { box-shadow: 0 0 0 2px rgba(0,0,0,.45), 0 10px 24px rgba(0,0,0,.45); }
-.pixel-text { text-shadow: 2px 2px 0 rgba(0,0,0,.55); }

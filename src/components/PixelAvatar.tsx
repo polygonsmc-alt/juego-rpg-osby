@@ -50,7 +50,7 @@ export default function PixelAvatar({ sprite, size = 72, label, animated = false
     <div
       role="img"
       aria-label={label || `Avatar pixel ${sprite}`}
-      className={`${animated ? "animate-walk" : ""} ${className}`}
+      className={`${animated ? "sprite-bob" : ""} ${className}`}
       style={{ width: size, height: size, display: "grid", gridTemplateColumns: `repeat(12, ${px}px)`, gridTemplateRows: `repeat(12, ${px}px)`, imageRendering: "pixelated", filter: "drop-shadow(2px 3px 0 rgba(0,0,0,.5))" }}
     >
       {rows.flatMap((row, y) =>

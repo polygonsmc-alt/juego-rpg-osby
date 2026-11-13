@@ -2,7 +2,7 @@
 // Corvo, el Cuervo de RRHH: negro con brillo azul/morado, pico y ojos amarillos,
 // lentes, corbata roja de RRHH, sobre en el pico, parado en una ramita.
 // Navidad: gorro de Santa. Halloween: sombrerito de bruja.
-export default function Corvo({ season = "navidad", size = 96 }: { season?: string; size?: number }) {
+export default function Corvo({ season = "navidad", size = 96, caption = true }: { season?: string; size?: number; caption?: boolean }) {
   const isNavidad = season === "navidad";
   const isHalloween = season === "halloween";
   const hat = isNavidad ? "#d7263d" : isHalloween ? "#7c3aed" : "#111111";
@@ -33,9 +33,11 @@ export default function Corvo({ season = "navidad", size = 96 }: { season?: stri
           <div key={`${y}-${x}`} style={{ width: px, height: px, background: colors[ch] || "transparent" }} />
         )))}
       </div>
-      <p style={{ fontSize: 11, textAlign: "center", marginTop: 4 }}>
-        🐦‍⬛ Corvo — RRHH {isNavidad ? "🎅" : isHalloween ? "🎃" : ""} · ¡Caw!
-      </p>
+      {caption && (
+        <p style={{ fontSize: 11, textAlign: "center", marginTop: 4 }}>
+          🐦‍⬛ Corvo — RRHH {isNavidad ? "🎅" : isHalloween ? "🎃" : ""} · ¡Caw!
+        </p>
+      )}
     </div>
   );
 }
