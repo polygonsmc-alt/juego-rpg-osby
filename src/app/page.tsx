@@ -12,6 +12,7 @@ import TierBadge from "@/components/TierBadge";
 
 const SEED_STATE: GameState = {
   collaborators: COLLABORATORS_SEED,
+  action_types: ACTIONS,
   prizes: PRIZES_SEED,
   events: [],
   redemptions: [],
@@ -37,8 +38,9 @@ export default function LaCarrera() {
 
   async function load() {
     if (!isSupabaseConfigured) return;
-    const [c, p, e, r, a, ca, s] = await Promise.all([
+    const [c, at, p, e, r, a, ca, s] = await Promise.all([
       supabase.from("collaborators").select("*").order("points", { ascending: false }),
+      supabase.from("action_types").select("*").order("id"),
       supabase.from("prizes").select("*").order("cost", { ascending: true }),
       supabase.from("point_events").select("*").order("created_at", { ascending: false }).limit(20),
       supabase.from("redemptions").select("*").eq("status", "approved").order("created_at", { ascending: false }),
@@ -48,6 +50,7 @@ export default function LaCarrera() {
     ]);
     setState((prev) => ({
       collaborators: (c.data as Collaborator[]) || prev.collaborators,
+      action_types: (at.data as GameState["action_types"])?.length ? (at.data as GameState["action_types"]) : prev.action_types,
       prizes: p.data || prev.prizes,
       events: e.data || prev.events,
       redemptions: r.data || prev.redemptions,
@@ -64,6 +67,7 @@ export default function LaCarrera() {
     const channel = supabase
       .channel("carrera")
       .on("postgres_changes", { event: "*", schema: "public", table: "collaborators" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "action_types" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "point_events" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "prizes" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "redemptions" }, load)
@@ -78,7 +82,7 @@ export default function LaCarrera() {
   const sorted = [...state.collaborators].sort((a, b) => b.points - a.points || a.id - b.id);
   const actionLabel = (id: number | null) => {
     if (id == null) return null;
-    return ACTIONS.find((a) => a.id === id)?.label ?? null;
+    return (state.action_types?.length ? state.action_types : ACTIONS).find((a) => a.id === id)?.label ?? null;
   };
 
   return (

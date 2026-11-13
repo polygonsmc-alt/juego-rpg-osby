@@ -2,8 +2,8 @@
 import { useEffect, useState } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { ACTIONS, PENALTIES, COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, THEMES, levelFor } from "@/lib/data";
-import type { GameState, Collaborator, PointEvent } from "@/lib/types";
-import { awardPoints, deductPoints, directRedeem, undoEvent, testConnection, resolveRedemption, addPrize, updatePrize, removePrize, publishAnnouncement, toggleAnnouncementAction, deleteAnnouncementAction, saveCompanyAction, saveAppearanceAction } from "@/lib/actions";
+import type { GameState, Collaborator, PointEvent, ActionType } from "@/lib/types";
+import { awardPoints, deductPoints, directRedeem, undoEvent, testConnection, resolveRedemption, addPrize, updatePrize, removePrize, publishAnnouncement, toggleAnnouncementAction, deleteAnnouncementAction, saveCompanyAction, saveAppearanceAction, addActionType, updateActionType, removeActionType } from "@/lib/actions";
 import { logoutPin } from "@/lib/auth";
 import PixelAvatar from "@/components/PixelAvatar";
 import Podium from "@/components/Podium";
@@ -13,7 +13,7 @@ import Merlin from "@/components/Merlin";
 import Corvo from "@/components/Corvo";
 
 const SEED: GameState = {
-  collaborators: COLLABORATORS_SEED, prizes: PRIZES_SEED, events: [], redemptions: [],
+  collaborators: COLLABORATORS_SEED, action_types: ACTIONS, prizes: PRIZES_SEED, events: [], redemptions: [],
   announcements: MERLIN_SEED, crow_announcements: CORVO_SEED, settings: SETTINGS_SEED,
 };
 
@@ -81,6 +81,12 @@ export default function Master() {
   const [newPrizeName, setNewPrizeName] = useState("");
   const [newPrizeCost, setNewPrizeCost] = useState("");
   const [newPrizeStock, setNewPrizeStock] = useState("");
+  // Editar / agregar acción (ACCIONES Y PUNTOS)
+  const [editingAction, setEditingAction] = useState<number | null>(null);
+  const [editActionName, setEditActionName] = useState("");
+  const [editActionPoints, setEditActionPoints] = useState("");
+  const [newActionName, setNewActionName] = useState("");
+  const [newActionPoints, setNewActionPoints] = useState("");
 
   function humanError(e?: string) {
     switch (e) {
@@ -119,8 +125,9 @@ export default function Master() {
   async function load() {
     if (!isSupabaseConfigured) return;
     try {
-      const [c, p, e, r, a, ca, s] = await Promise.all([
+      const [c, at, p, e, r, a, ca, s] = await Promise.all([
         supabase.from("collaborators").select("*").order("id"),
+        supabase.from("action_types").select("*").order("id"),
         supabase.from("prizes").select("*").order("cost"),
         supabase.from("point_events").select("*").order("created_at", { ascending: false }).limit(50),
         supabase.from("redemptions").select("*").order("created_at", { ascending: false }),
@@ -128,10 +135,11 @@ export default function Master() {
         supabase.from("crow_announcements").select("*").order("id"),
         supabase.from("settings").select("*").eq("id", 1).single(),
       ]);
-      const err = [c, p, e, r, a, ca, s].find((x) => x.error)?.error;
+      const err = [c, at, p, e, r, a, ca, s].find((x) => x.error)?.error;
       if (err) { showMsg("err", `Error al cargar desde Supabase: ${err.message}`); return; }
       setState((prev) => ({
         collaborators: (c.data as Collaborator[]) || prev.collaborators,
+        action_types: (at.data as ActionType[])?.length ? (at.data as ActionType[]) : prev.action_types,
         prizes: p.data || prev.prizes,
         events: e.data || prev.events,
         redemptions: r.data || prev.redemptions,
@@ -156,6 +164,10 @@ export default function Master() {
   const directCanRedeem = directAffords && directInStock;
   const pendingRedemptions = state.redemptions.filter((r) => r.status === "pending");
   const resolvedRedemptions = state.redemptions.filter((r) => r.status !== "pending");
+  // Catálogo de acciones cargado de Supabase (action_types); en modo ejemplo
+  // usa el seed. SUMAR PUNTOS y los bonos usan esta lista, así una acción
+  // nueva o editada aparece y vale lo nuevo de inmediato.
+  const actions: ActionType[] = state.action_types?.length ? state.action_types : ACTIONS;
 
   async function doTestConnection() {
     try {
@@ -333,6 +345,46 @@ export default function Master() {
     }
   }
 
+  // ACCIONES Y PUNTOS — agregar / editar / eliminar acciones del catálogo
+  async function doAddAction() {
+    if (!newActionName.trim() || !(Number(newActionPoints) > 0)) return;
+    setBusy(true);
+    try {
+      const res = await addActionType(newActionName.trim(), Math.trunc(Number(newActionPoints)));
+      if (!res.ok) { showMsg("err", humanError(res.error)); return; }
+      setNewActionName(""); setNewActionPoints("");
+      await refresh();
+      showMsg("ok", "Acción agregada: ya aparece en SUMAR PUNTOS");
+    } catch (e) {
+      showMsg("err", `Error al agregar la acción: ${e instanceof Error ? e.message : String(e)}`);
+    } finally { setBusy(false); }
+  }
+  async function doSaveAction(id: number) {
+    if (!editActionName.trim() || !(Number(editActionPoints) > 0)) return;
+    setBusy(true);
+    try {
+      const res = await updateActionType(id, editActionName.trim(), Math.trunc(Number(editActionPoints)));
+      if (!res.ok) { showMsg("err", humanError(res.error)); return; }
+      setEditingAction(null);
+      await refresh();
+      showMsg("ok", "Acción guardada");
+    } catch (e) {
+      showMsg("err", `Error al guardar la acción: ${e instanceof Error ? e.message : String(e)}`);
+    } finally { setBusy(false); }
+  }
+  async function doRemoveAction(id: number, label: string) {
+    if (!confirm(`¿Eliminar la acción «${label}»? Ya no aparecerá en SUMAR PUNTOS.`)) return;
+    setBusy(true);
+    try {
+      const res = await removeActionType(id);
+      if (!res.ok) { showMsg("err", humanError(res.error)); return; }
+      await refresh();
+      showMsg("ok", "Acción eliminada");
+    } catch (e) {
+      showMsg("err", `Error al eliminar la acción: ${e instanceof Error ? e.message : String(e)}`);
+    } finally { setBusy(false); }
+  }
+
   const undoable = state.events.filter((e) => !e.reversed && e.kind !== "reversal");
   const lastUndoable = undoable[0] ?? null;
   const shownEvents = state.events.slice(0, 12);
@@ -375,7 +427,7 @@ export default function Master() {
               </select>
               <select aria-label="Acción a la que aplica el bono" className={inputCls} value={pubAction[table] || "all"} onChange={(e) => setPubAction((s) => ({ ...s, [table]: e.target.value }))}>
                 <option value="all">Todas las acciones</option>
-                {ACTIONS.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+                {actions.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
               </select>
             </div>
           )}
@@ -454,7 +506,7 @@ export default function Master() {
           )}
           <p className="mt-4 text-sm font-semibold text-[var(--text)]">¿Qué hizo?</p>
           <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            {ACTIONS.map((a) => (
+            {actions.map((a) => (
               <button key={a.id} type="button" disabled={!collab || busy} aria-label={`Sumar ${a.points} puntos por ${a.label}`} onClick={() => doAward(a)} className="flex min-h-12 items-center justify-between gap-2 rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-left disabled:opacity-40">
                 <span className="text-sm font-semibold text-[var(--text)]">{a.label}</span>
                 <span className="font-pixel shrink-0 text-[11px] text-[var(--green)]">+{fmt(a.points)}</span>
@@ -467,6 +519,38 @@ export default function Master() {
             <button type="submit" className={btnPrimary} disabled={busy}>APLICAR</button>
           </form>
           {collab && <div className="mt-3 flex items-center gap-2"><PixelAvatar sprite={collab.sprite} points={collab.points} size={40} /><span>{collab.name} — {collab.points} pts</span></div>}
+        </section>
+
+        {/* Acciones y puntos — como el Master: editar, agregar y eliminar acciones */}
+        <section aria-label="Acciones que dan puntos" className="panel p-4 sm:p-5">
+          <h2 className="font-pixel text-sm text-[var(--text)]">ACCIONES Y PUNTOS</h2>
+          <p className="mt-2 text-sm text-[var(--dim)]">Estas son las acciones que aparecen en SUMAR PUNTOS. Si cambias los puntos de una acción, el botón de SUMAR PUNTOS ya suma el valor nuevo.</p>
+          <ul className="mt-3 flex flex-col divide-y divide-[var(--border)]">
+            {actions.map((a) => (
+              <li key={a.id} className="py-2.5">
+                {editingAction === a.id ? (
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input aria-label="Nombre de la acción" type="text" className={`${inputCls} flex-1`} value={editActionName} onChange={(e) => setEditActionName(e.target.value)} />
+                    <input aria-label="Puntos de la acción" type="number" inputMode="numeric" className={`${inputCls} sm:w-28`} value={editActionPoints} onChange={(e) => setEditActionPoints(e.target.value)} />
+                    <button type="button" className={btnPrimary} disabled={busy || !editActionName.trim() || !(Number(editActionPoints) > 0)} aria-label={`Guardar acción ${a.label}`} onClick={() => doSaveAction(a.id)}>GUARDAR</button>
+                    <button type="button" className="min-h-11 rounded-md border-2 border-[var(--border)] px-4 py-2 text-sm font-bold text-[var(--dim)]" onClick={() => setEditingAction(null)}>Cancelar</button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <p className="min-w-0 flex-1 text-sm text-[var(--text)]">{a.label}</p>
+                    <span className="font-pixel shrink-0 text-[11px] text-[var(--green)]">+{fmt(a.points)}</span>
+                    <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar acción ${a.label}`} onClick={() => { setEditingAction(a.id); setEditActionName(a.label); setEditActionPoints(String(a.points)); }}>Editar</button>
+                    <button type="button" className={btnDanger} disabled={busy} aria-label={`Eliminar acción ${a.label}`} onClick={() => doRemoveAction(a.id, a.label)}>Eliminar</button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+          <form className="mt-4 flex flex-col gap-2 border-t-2 border-dashed border-[var(--border)] pt-4 sm:flex-row" onSubmit={(e) => { e.preventDefault(); doAddAction(); }}>
+            <input aria-label="Nombre de la nueva acción" type="text" placeholder="Nueva acción (ej. Meta semanal cumplida)" className={`${inputCls} flex-1`} value={newActionName} onChange={(e) => setNewActionName(e.target.value)} />
+            <input aria-label="Puntos de la nueva acción" type="number" inputMode="numeric" placeholder="Pts" className={`${inputCls} sm:w-28`} value={newActionPoints} onChange={(e) => setNewActionPoints(e.target.value)} />
+            <button type="submit" className={btnPrimary} disabled={busy || !newActionName.trim() || !(Number(newActionPoints) > 0)}>AGREGAR</button>
+          </form>
         </section>
 
         {/* Deshacer — como el Master */}

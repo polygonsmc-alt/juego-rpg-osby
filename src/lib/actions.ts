@@ -216,6 +216,57 @@ export async function undoEvent(eventId: number) {
   }
 }
 
+// --- Catálogo de acciones (Master: ACCIONES Y PUNTOS) ---
+// La tabla action_types tiene id bigint primary key SIN identity, por eso
+// al agregar se calcula el siguiente id (max + 1). La columna se llama
+// `label`, no `name` (la firma recibe name para que sea igual al Master).
+function validAction(name: string, points: number): string | null {
+  if (!name.trim()) return "Escribe el nombre de la acción.";
+  if (!Number.isInteger(points) || points <= 0) return "Los puntos deben ser un número entero mayor que 0.";
+  return null;
+}
+export async function addActionType(name: string, points: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  const bad = validAction(name, points);
+  if (bad) return { ok: false as const, error: bad };
+  try {
+    const db = supabaseAdmin();
+    const { data: last } = await db.from("action_types").select("id").order("id", { ascending: false }).limit(1);
+    const nextId = ((last?.[0]?.id as number | undefined) ?? 0) + 1;
+    dbErr(await db.from("action_types").insert({ id: nextId, label: name.trim(), points: Math.trunc(points) }).select("id"));
+    return { ok: true as const, id: nextId };
+  } catch (e) { return { ok: false as const, error: errText(e) }; }
+}
+export async function updateActionType(id: number, name: string, points: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  const bad = validAction(name, points);
+  if (bad) return { ok: false as const, error: bad };
+  try {
+    const db = supabaseAdmin();
+    dbErr(await db.from("action_types").update({ label: name.trim(), points: Math.trunc(points) }).eq("id", id).select("id"));
+    return { ok: true as const };
+  } catch (e) { return { ok: false as const, error: errText(e) }; }
+}
+export async function removeActionType(id: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  try {
+    const db = supabaseAdmin();
+    // Un comunicado con bono puede apuntar a esta acción (bonus_action_id
+    // es FK a action_types): quitar la referencia antes de borrar, si no
+    // Supabase rechaza el borrado con error de llave foránea.
+    await db.from("announcements").update({ bonus_action_id: null }).eq("bonus_action_id", id);
+    await db.from("crow_announcements").update({ bonus_action_id: null }).eq("bonus_action_id", id);
+    dbErr(await db.from("action_types").delete().eq("id", id).select("id"));
+    return { ok: true as const };
+  } catch (e) { return { ok: false as const, error: errText(e) }; }
+}
+
 // --- Gestión de premios y comunicados (Master) ---
 export async function addPrize(name: string, cost: number, stock: number) {
   const auth = await requireMasterAuth();

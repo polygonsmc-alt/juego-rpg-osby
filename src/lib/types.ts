@@ -71,6 +71,7 @@ export interface Settings {
 
 export interface GameState {
   collaborators: Collaborator[];
+  action_types: ActionType[]; // Catálogo de acciones (12 en seed) — el Master lo edita
   prizes: Prize[];
   events: PointEvent[];
   redemptions: Redemption[];
