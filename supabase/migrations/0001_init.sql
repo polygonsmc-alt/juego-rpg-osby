@@ -1,0 +1,180 @@
+-- Juego RPG de Metas — migración 0001
+-- Next.js 14 + Supabase (Postgres + Realtime)
+-- UN SOLO numero de puntos por persona.
+-- Proyecto: https://ewwrbsoltopjswobwbqg.supabase.co
+
+create extension if not exists "pgcrypto";
+
+-- Colaboradores (solo puntos actuales)
+create table if not exists collaborators (
+  id bigint generated always as identity primary key,
+  name text not null,
+  sprite int not null default 0 check (sprite >= 0 and sprite <= 11),
+  points int not null default 0 check (points >= 0),
+  created_at timestamptz not null default now()
+);
+
+-- Catálogo de acciones (12) — se siembra desde la app si está vacío
+create table if not exists action_types (
+  id bigint primary key,
+  label text not null,
+  points int not null
+);
+
+create table if not exists penalty_types (
+  id bigint primary key,
+  label text not null,
+  points int not null
+);
+
+-- Historial de movimientos. reversed=true marca DESHECHO, no se borra.
+create table if not exists point_events (
+  id bigint generated always as identity primary key,
+  collaborator_id bigint not null references collaborators(id) on delete cascade,
+  kind text not null check (kind in ('award','penalty','redeem','reversal','custom')),
+  label text not null,
+  points int not null,
+  reason text,
+  reversed boolean not null default false,
+  bonus_from text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_point_events_collab on point_events(collaborator_id, created_at desc);
+
+-- Premios con stock
+create table if not exists prizes (
+  id bigint primary key,
+  name text not null,
+  cost int not null check (cost > 0),
+  stock int not null default 0 check (stock >= 0)
+);
+
+-- Canjes. Solo el Master aprueba / hace canje directo.
+create table if not exists redemptions (
+  id bigint generated always as identity primary key,
+  collaborator_id bigint not null references collaborators(id) on delete cascade,
+  prize_id bigint not null references prizes(id),
+  prize_name text not null,
+  cost int not null,
+  status text not null default 'pending' check (status in ('pending','approved','rejected')),
+  created_at timestamptz not null default now(),
+  resolved_at timestamptz
+);
+
+-- Comunicados de Merlín
+create table if not exists announcements (
+  id bigint generated always as identity primary key,
+  title text not null,
+  body text not null,
+  active boolean not null default true,
+  bonus_multiplier int check (bonus_multiplier in (2,3)),
+  bonus_action_id bigint references action_types(id),
+  created_at timestamptz not null default now()
+);
+
+-- Comunicados del Cuervo de RRHH (Corvo) — tabla aparte, recuadro aparte
+create table if not exists crow_announcements (
+  id bigint generated always as identity primary key,
+  title text not null,
+  body text not null,
+  active boolean not null default false,
+  bonus_multiplier int check (bonus_multiplier in (2,3)),
+  bonus_action_id bigint references action_types(id),
+  created_at timestamptz not null default now()
+);
+
+-- Configuración: empresa, tema, temporada
+create table if not exists settings (
+  id bigint primary key,
+  company_name text not null default 'SCRIPT TECNOLOGIAS DE LA INFORMACION',
+  logo_url text,
+  theme text not null default 'bosque' check (theme in ('clasico','bosque','oceano','atardecer','neon')),
+  season text not null default 'navidad' check (season in ('navidad','halloween','primavera','verano','sin-temporada'))
+);
+
+-- RLS: para este juego interno se habilita con políticas permisivas de lectura
+-- y escritura vía anon (el Master es de uso interno; endurecer con auth si se expone).
+alter table collaborators enable row level security;
+alter table action_types enable row level security;
+alter table penalty_types enable row level security;
+alter table point_events enable row level security;
+alter table prizes enable row level security;
+alter table redemptions enable row level security;
+alter table announcements enable row level security;
+alter table crow_announcements enable row level security;
+alter table settings enable row level security;
+
+do $$ begin
+  create policy "public read" on collaborators for select using (true);
+  create policy "public write" on collaborators for all using (true);
+  create policy "public read" on action_types for select using (true);
+  create policy "public write" on action_types for all using (true);
+  create policy "public read" on penalty_types for select using (true);
+  create policy "public write" on penalty_types for all using (true);
+  create policy "public read" on point_events for select using (true);
+  create policy "public write" on point_events for all using (true);
+  create policy "public read" on prizes for select using (true);
+  create policy "public write" on prizes for all using (true);
+  create policy "public read" on redemptions for select using (true);
+  create policy "public write" on redemptions for all using (true);
+  create policy "public read" on announcements for select using (true);
+  create policy "public write" on announcements for all using (true);
+  create policy "public read" on crow_announcements for select using (true);
+  create policy "public write" on crow_announcements for all using (true);
+  create policy "public read" on settings for select using (true);
+  create policy "public write" on settings for all using (true);
+exception when duplicate_object then null; end $$;
+
+-- Realtime: Master -> La Carrera en <5s
+alter publication supabase_realtime add table collaborators;
+alter publication supabase_realtime add table point_events;
+alter publication supabase_realtime add table prizes;
+alter publication supabase_realtime add table redemptions;
+alter publication supabase_realtime add table announcements;
+alter publication supabase_realtime add table crow_announcements;
+alter publication supabase_realtime add table settings;
+
+-- Seed: acciones (12)
+insert into action_types (id, label, points) values
+ (1,'Venta concretada',100),(2,'Entrega de proyecto a tiempo',50),
+ (3,'Semana sin faltas ni retardos',50),(4,'Cliente referido que sí compra',40),
+ (5,'Idea de mejora que se implementa',40),(6,'Venta de producto destacado / upsell',30),
+ (7,'Reseña de 5 estrellas conseguida',30),(8,'Lead nuevo',25),
+ (9,'Entrega sin correcciones',25),(10,'Capacitación o curso completado',20),
+ (11,'Ayuda a un compañero (validada)',15),(12,'Check-in puntual',10)
+on conflict (id) do nothing;
+
+insert into penalty_types (id, label, points) values
+ (1,'Falta injustificada',-50),(2,'Error en una entrega',-30),
+ (3,'Retardo',-15),(4,'No reportar avance / falta de comunicación',-10)
+on conflict (id) do nothing;
+
+-- Seed: participantes en 0, Novato, empatados
+insert into collaborators (id, name, sprite, points) values
+ (1,'FANY MOTA',2,0),(2,'OSBED',0,0),(3,'mayra morua',10,0)
+on conflict (id) do nothing;
+
+-- Seed: premios + stock
+insert into prizes (id, name, cost, stock) values
+ (1,'GIFT CARD 500MXN AMAZON',500,4),
+ (2,'GIFT CARD 500MXN CINEPOLIS',700,5),
+ (3,'Videojuego',900,3),
+ (4,'TABLET SAMSUNG A11+',1400,2),
+ (5,'TV 50 PULGADAS TCL',2000,1),
+ (6,'CONSOLA SONY PS5 (STANDARD)',100000,1)
+on conflict (id) do nothing;
+
+insert into settings (id, company_name, logo_url, theme, season) values
+ (1,'SCRIPT TECNOLOGIAS DE LA INFORMACION',null,'bosque','navidad')
+on conflict (id) do nothing;
+
+insert into announcements (id, title, body, active, bonus_multiplier, bonus_action_id) values
+ (1,'MERLIN A HABLADO | PUNTOS DOBLES','Si todos hacen check in entre las 9 y 9:05 AM se llevaran puntos dobles',true,2,12)
+on conflict (id) do nothing;
+
+insert into crow_announcements (id, title, body, active, bonus_multiplier, bonus_action_id) values
+ (1,'¡Caw! Puntos dobles en check-in','¡Caw! Traigo mensaje de RRHH: esta semana hay puntos dobles en check-in',true,null,null),
+ (2,'¡Caw! ¿Quién sigue?','¡Caw! Fany canjeó su Gift Card, ¿quién sigue?',false,null,null),
+ (3,'¡Caw! Mayra, casi llegas','¡Caw! Mayra, te faltan 300 pts para la Tablet',false,null,null),
+ (4,'¡Caw! Canjes en RRHH','¡Caw! Recuerden: para canjear vayan a RRHH',false,null,null)
+on conflict (id) do nothing;
