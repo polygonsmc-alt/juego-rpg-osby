@@ -25,7 +25,7 @@ export default function Podium({ collaborators }: { collaborators: Collaborator[
             {place}°
           </span>
           <span className="sprite-bob inline-block">
-            <PixelAvatar sprite={p.sprite} size={isFirst ? 72 : 60} label={p.name} />
+            <PixelAvatar sprite={p.sprite} points={p.points} size={isFirst ? 72 : 60} label={p.name} />
           </span>
         </div>
         <div className="min-w-0 flex-1">

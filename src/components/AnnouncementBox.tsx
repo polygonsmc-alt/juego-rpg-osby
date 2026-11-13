@@ -2,6 +2,7 @@
 import type { Announcement } from "@/lib/types";
 import Merlin from "./Merlin";
 import Corvo from "./Corvo";
+import { SleighSprite } from "./sprites";
 
 // Recuadros tal cual el Master: panel horizontal, sprite a la izquierda,
 // "MERLÍN DICE:" / "EL CUERVO DE RRHH DICE:" en pixel, chip de bono.
@@ -27,9 +28,7 @@ export function MerlinBox({ announcements, season, actionLabel }: { announcement
             <span className="sprite-bob inline-block">
               <Merlin season={season} size={56} caption={false} />
             </span>
-            {season === "navidad" && (
-              <span className="text-2xl leading-none" aria-hidden>🛷🎁🎄</span>
-            )}
+            {season === "navidad" && <SleighSprite size={64} />}
           </span>
           <div className="min-w-0 flex-1">
             <p className="font-pixel text-[10px]" style={{ color: "#6d4fc2" }}>MERLÍN DICE:</p>

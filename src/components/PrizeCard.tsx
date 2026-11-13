@@ -1,13 +1,14 @@
 "use client";
 import type { Prize, Redemption } from "@/lib/types";
 import { premioMayor } from "@/lib/data";
+import { PrizeIcon } from "./sprites";
 
 // Tarjeta de premio tal cual el Master: panel, icono a la izquierda,
 // costo en pixel, chip de stock, caja "SOLICITAR CANJE EN RRHH" en pixel.
 // Sin barra de progreso (el Master no la tiene).
 // El letrero "¡TE LO GANARON!" solo aparece si el stock llegó a 0.
 const PRIZE_ICON: Record<number, string> = {
-  1: "🎫", 2: "🎬", 3: "🎮", 4: "📱", 5: "📺", 6: "🕹️",
+  1: "gift", 2: "gift", 3: "game", 4: "console", 5: "tv", 6: "console",
 };
 
 export default function PrizeCard({ prize, prizes, redemptions }: { prize: Prize; prizes: Prize[]; redemptions?: Redemption[] }) {
@@ -43,7 +44,7 @@ export default function PrizeCard({ prize, prizes, redemptions }: { prize: Prize
       )}
       <div className="flex items-start gap-3">
         <span className={isTop ? "inline-flex shrink-0 rounded-lg border-2 border-[#e6a817] bg-white/60 p-1 shadow-[0_0_12px_rgba(245,184,30,0.65)] dark:bg-black/20" : "inline-flex shrink-0"}>
-          <span className="leading-none" style={{ fontSize: isTop ? 56 : 52 }}>{PRIZE_ICON[prize.id] || "🎁"}</span>
+          <PrizeIcon icon={PRIZE_ICON[prize.id] || "gift"} size={isTop ? 56 : 52} />
         </span>
         <div className="min-w-0 flex-1">
           <h3 className="text-base font-bold text-[var(--text)]">{prize.name}</h3>

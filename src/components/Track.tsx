@@ -3,20 +3,17 @@ import type { Collaborator, Prize } from "@/lib/types";
 import { levelFor } from "@/lib/data";
 import PixelAvatar from "./PixelAvatar";
 import TierBadge from "./TierBadge";
+import { SeasonIcon, PrizeIcon, FlagIcon, SEASON_DECOR } from "./sprites";
 
 // Pista tal cual el Master: regla de premios arriba, carriles de 56px con
 // ticks, barra verde abajo y monito de 44px que camina por puntos/meta.
 // Nieve: 14 copos cuadrados blancos cayendo DENTRO del panel (Navidad).
 
-const SEASON_DECOR: Record<string, string[]> = {
-  navidad: ["🌲", "❄️", "🌲", "❄️"],
-  halloween: ["🎃", "🦇", "🎃", "🦇"],
-  primavera: ["🌸", "🌸", "🌸", "🌸"],
-  verano: ["☀️", "⛱️", "☀️", "⛱️"],
-};
-
+// Íconos pixel exactos del Master (sprites.tsx): por id de premio.
+// 1-2 gift cards -> gift, 3 Videojuego -> game, 4 Tablet -> console,
+// 5 TV -> tv, 6 PS5 -> console.
 const PRIZE_ICON: Record<number, string> = {
-  1: "🎫", 2: "🎬", 3: "🎮", 4: "📱", 5: "📺", 6: "🕹️",
+  1: "gift", 2: "gift", 3: "game", 4: "console", 5: "tv", 6: "console",
 };
 
 export default function Track({ collaborators, prizes, season }: { collaborators: Collaborator[]; prizes: Prize[]; season: string }) {
@@ -59,7 +56,7 @@ export default function Track({ collaborators, prizes, season }: { collaborators
         {season !== "sin-temporada" && decor.length > 0 && (
           <div aria-hidden="true" className="flex items-end justify-between px-3 pt-3 sm:px-4">
             {decor.map((icon, i) => (
-              <span key={i} className="text-[30px] leading-none">{icon}</span>
+              <SeasonIcon key={i} name={icon} size={30} />
             ))}
           </div>
         )}
@@ -77,7 +74,7 @@ export default function Track({ collaborators, prizes, season }: { collaborators
                 title={isTop ? `Premio mayor — ${prize.name}: ${prize.cost.toLocaleString("es-MX")} pts` : `${prize.name}: ${prize.cost.toLocaleString("es-MX")} pts`}
               >
                 <span className={isTop ? "inline-flex rounded-full border-2 border-[#e6a817] bg-[#fff3c4] p-0.5 shadow-[0_0_10px_rgba(245,184,30,0.85)]" : "inline-flex"}>
-                  <span className="text-[26px] leading-none" style={isTop ? { fontSize: 28 } : undefined}>{PRIZE_ICON[prize.id] || "🎁"}</span>
+                  <PrizeIcon icon={PRIZE_ICON[prize.id] || "gift"} size={isTop ? 28 : 26} />
                 </span>
                 <span className="mt-0.5 text-[10px] font-bold" style={{ color: isTop ? "#b8860b" : "var(--dim)" }}>
                   {prize.cost.toLocaleString("es-MX")}
@@ -86,7 +83,9 @@ export default function Track({ collaborators, prizes, season }: { collaborators
             );
           })}
           <div className="absolute right-0 top-0 translate-x-1/3">
-            <span className="goal-pulse inline-block text-2xl leading-none">🏁</span>
+            <span className="goal-pulse inline-block">
+              <FlagIcon size={24} />
+            </span>
           </div>
         </div>
 
@@ -114,7 +113,7 @@ export default function Track({ collaborators, prizes, season }: { collaborators
                   <div className="absolute bottom-0 left-0 h-2 bg-[var(--green)] opacity-70 transition-all duration-700" style={{ width: `${pct}%` }} />
                   <div className="absolute bottom-1 transition-all duration-700" style={{ left: `clamp(0px, calc(${pct}% - 22px), calc(100% - 44px))` }}>
                     <span className="sprite-bob inline-block" style={{ animationDelay: `${(i % 5) * 0.15}s` }}>
-                      <PixelAvatar sprite={p.sprite} size={44} label={p.name} animated={false} />
+                      <PixelAvatar sprite={p.sprite} points={p.points} size={44} label={p.name} animated={false} />
                     </span>
                   </div>
                 </div>

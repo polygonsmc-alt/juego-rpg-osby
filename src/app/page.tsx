@@ -154,7 +154,7 @@ export default function LaCarrera() {
                   return (
                     <li key={p.id} className="flex items-center gap-3 px-4 py-3">
                       <span className="font-pixel w-7 shrink-0 text-center text-xs" style={{ color: i === 0 ? "var(--gold)" : i === 1 ? "#9aa5b1" : i === 2 ? "#e08a4c" : "var(--dim)" }}>{i + 1}</span>
-                      <PixelAvatar sprite={p.sprite} size={34} label={p.name} />
+                      <PixelAvatar sprite={p.sprite} points={p.points} size={34} label={p.name} />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-bold text-[var(--text)]">{p.name}</p>
                         <p className="text-xs text-[var(--dim)]">
