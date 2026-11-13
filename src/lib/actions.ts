@@ -1,5 +1,6 @@
 "use server";
 import { supabaseAdmin, isSupabaseConfigured } from "./supabase";
+import { isMasterAuthenticated } from "./auth";
 import { bestBonus } from "./data";
 import type { Announcement } from "./types";
 
@@ -8,6 +9,16 @@ import type { Announcement } from "./types";
 // claro que el Master muestra en rojo, que fallar en silencio.
 function notConfigured() {
   return { ok: false as const, error: "supabase_no_configurado" };
+}
+
+// PIN del Master: ninguna acción que cambia datos corre sin sesión.
+// Devuelve el objeto de error para devolverlo tal cual, o null si hay
+// sesión. No hay excepción: el PIN no configurado tampoco abre nada.
+async function requireMasterAuth() {
+  if (!(await isMasterAuthenticated())) {
+    return { ok: false as const, error: "no_autorizado" };
+  }
+  return null;
 }
 
 // Toda acción de servidor atrapa su propio error y lo devuelve como
@@ -49,6 +60,8 @@ async function getBonuses() {
 // Prueba de conexión: lee collaborators desde Vercel y devuelve el
 // conteo o el error exacto de Supabase, para diagnosticar en el Master.
 export async function testConnection() {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
   if (!isSupabaseConfigured) return notConfigured();
   try {
     const db = supabaseAdmin();
@@ -61,6 +74,8 @@ export async function testConnection() {
 }
 
 export async function awardPoints(collaboratorId: number, actionId: number, label: string, basePoints: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
   if (!isSupabaseConfigured) return notConfigured();
   try {
     const db = supabaseAdmin();
@@ -83,6 +98,8 @@ export async function awardPoints(collaboratorId: number, actionId: number, labe
 }
 
 export async function deductPoints(collaboratorId: number, label: string, points: number, reason?: string) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
   if (!isSupabaseConfigured) return notConfigured();
   try {
     const db = supabaseAdmin();
@@ -100,6 +117,8 @@ export async function deductPoints(collaboratorId: number, label: string, points
 }
 
 export async function directRedeem(collaboratorId: number, prizeId: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
   if (!isSupabaseConfigured) return notConfigured();
   try {
     const db = supabaseAdmin();
@@ -129,6 +148,8 @@ export async function directRedeem(collaboratorId: number, prizeId: number) {
 // Resolver una solicitud pendiente (Master): aprobar descuenta puntos y
 // stock y la marca aprobada; rechazar solo la marca rechazada.
 export async function resolveRedemption(redemptionId: number, approve: boolean) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
   if (!isSupabaseConfigured) return notConfigured();
   try {
     const db = supabaseAdmin();
@@ -160,6 +181,8 @@ export async function resolveRedemption(redemptionId: number, approve: boolean) 
 }
 
 export async function undoEvent(eventId: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
   if (!isSupabaseConfigured) return notConfigured();
   try {
     const db = supabaseAdmin();
@@ -195,6 +218,8 @@ export async function undoEvent(eventId: number) {
 
 // --- Gestión de premios y comunicados (Master) ---
 export async function addPrize(name: string, cost: number, stock: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
   if (!isSupabaseConfigured) return notConfigured();
   try {
     const db = supabaseAdmin();
@@ -203,6 +228,8 @@ export async function addPrize(name: string, cost: number, stock: number) {
   } catch (e) { return { ok: false as const, error: errText(e) }; }
 }
 export async function updatePrize(id: number, fields: { name?: string; cost?: number; stock?: number }) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
   if (!isSupabaseConfigured) return notConfigured();
   try {
     const db = supabaseAdmin();
@@ -211,6 +238,8 @@ export async function updatePrize(id: number, fields: { name?: string; cost?: nu
   } catch (e) { return { ok: false as const, error: errText(e) }; }
 }
 export async function removePrize(id: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
   if (!isSupabaseConfigured) return notConfigured();
   try {
     const db = supabaseAdmin();
@@ -219,10 +248,59 @@ export async function removePrize(id: number) {
   } catch (e) { return { ok: false as const, error: errText(e) }; }
 }
 export async function publishAnnouncement(table: "announcements" | "crow_announcements", title: string, body: string, bonusMultiplier: number | null, bonusActionId: number | null) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
   if (!isSupabaseConfigured) return notConfigured();
   try {
     const db = supabaseAdmin();
     dbErr(await db.from(table).insert({ title, body, active: true, bonus_multiplier: bonusMultiplier, bonus_action_id: bonusActionId }).select("id"));
+    return { ok: true as const };
+  } catch (e) { return { ok: false as const, error: errText(e) }; }
+}
+
+// --- Comunicados y ajustes (Master) — antes se hacían directo con el
+// cliente anon; ahora pasan por server action con PIN, como el resto. ---
+export async function toggleAnnouncementAction(table: "announcements" | "crow_announcements", id: number, active: boolean) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  try {
+    const db = supabaseAdmin();
+    const { error } = await db.from(table).update({ active: !active }).eq("id", id);
+    if (error) throw new Error(error.message);
+    return { ok: true as const, active: !active };
+  } catch (e) { return { ok: false as const, error: errText(e) }; }
+}
+export async function deleteAnnouncementAction(table: "announcements" | "crow_announcements", id: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  try {
+    const db = supabaseAdmin();
+    const { error } = await db.from(table).delete().eq("id", id);
+    if (error) throw new Error(error.message);
+    return { ok: true as const };
+  } catch (e) { return { ok: false as const, error: errText(e) }; }
+}
+export async function saveCompanyAction(companyName: string) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  try {
+    const db = supabaseAdmin();
+    const { error } = await db.from("settings").update({ company_name: companyName }).eq("id", 1);
+    if (error) throw new Error(error.message);
+    return { ok: true as const };
+  } catch (e) { return { ok: false as const, error: errText(e) }; }
+}
+export async function saveAppearanceAction(theme: string, season: string) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  try {
+    const db = supabaseAdmin();
+    const { error } = await db.from("settings").update({ theme, season }).eq("id", 1);
+    if (error) throw new Error(error.message);
     return { ok: true as const };
   } catch (e) { return { ok: false as const, error: errText(e) }; }
 }

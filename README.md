@@ -69,12 +69,28 @@ Ese archivo crea: `collaborators`, `action_types`, `penalty_types`,
 y siembra los 3 participantes en 0, los 6 premios con stock, el comunicado
 de Merlín y los 4 de Corvo (el primero activo, sin bono).
 
+## Proteger el Master con PIN
+
+El Panel Master (`/master`) pide un PIN de 4 a 6 dígitos. La Carrera (`/`)
+sigue pública, sin PIN, solo para ver.
+
+1. En Vercel > proyecto > **Settings > Environment Variables** agrega
+   `MASTER_PIN` con tu PIN (solo servidor, **sin** prefijo `NEXT_PUBLIC_`),
+   para **Production** (y Preview si quieres probar).
+2. **Redeploy** en Vercel > Deployments.
+3. Abre `/master`: te pide el PIN. Si te equivocas dice
+   `PIN incorrecto, intenta de nuevo`. La sesión dura 7 días; para salir
+   usa **SALIR / CERRAR SESIÓN** arriba en el Master.
+4. Sin `MASTER_PIN`, el Master no se abre y avisa que falta configurarlo.
+   No hay PIN por defecto y el PIN nunca va en el código ni en GitHub.
+
 ## Deploy a Vercel
 
 1. Sube este código a GitHub (org OSBY).
 2. En Vercel (Team OSBY) > Add New > Project > Import desde GitHub.
-3. En Settings > Environment Variables agrega las 3 variables de `.env.example`
-   (las mismas de Supabase, sin el prefijo de ejemplo).
+3. En Settings > Environment Variables agrega las 4 variables de `.env.example`
+   (las mismas de Supabase, sin el prefijo de ejemplo) **más `MASTER_PIN`**
+   con tu PIN de 4-6 dígitos (solo servidor, sin `NEXT_PUBLIC_`).
 4. Deploy. Vercel te da `https://juego-rpg-script.vercel.app`.
 5. Subdominio: en Vercel > Domains agrega `juego.tudominio.com` y en tu
    DNS crea un registro CNAME `juego` → `cname.vercel-dns.com`.
@@ -90,6 +106,11 @@ de Merlín y los 4 de Corvo (el primero activo, sin bono).
 ```
 src/app/page.tsx            La Carrera (visual, Realtime)
 src/app/master/page.tsx     Panel Master
+src/app/master/layout.tsx   Barrera del PIN (sin sesión no se renderiza)
+src/app/master-login/page.tsx  Pantalla de PIN + formulario
+src/middleware.ts           Redirige /master sin sesión a /master-login
+src/lib/auth.ts             PIN, cookie master_auth (HMAC, 7 días), salir
+src/lib/auth-token.ts       Firma/verificación del token (Edge + Node)
 src/app/layout.tsx          Layout + metadata
 src/components/            PixelAvatar, Merlin, Corvo, Podium, Track, PrizeCard, AnnouncementBox
 src/lib/data.ts             Acciones, restas, premios, niveles, seeds, mejor bono
@@ -107,3 +128,8 @@ supabase/migrations/0001_init.sql
 4. Canjear Amazon con 500 pts: descuenta 500 y stock 4 → 3.
 5. Deshacer ese canje: devuelve puntos y stock, y el evento queda DESHECHO; segundo Deshacer se rechaza.
 6. Cambiar temporada a Halloween: Merlín y Corvo cambian de gorro, sin nieve.
+7. PIN: abrir `/master` sin sesión redirige a `/master-login`; PIN
+   incorrecto dice `PIN incorrecto, intenta de nuevo`; con el PIN correcto
+   entra al Master y los botones guardan; **SALIR / CERRAR SESIÓN** vuelve
+   a pedir el PIN. Sin `MASTER_PIN` en Vercel, el Master avisa que falta
+   configurarlo y no se abre.

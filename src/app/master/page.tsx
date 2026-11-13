@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { ACTIONS, PENALTIES, COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, THEMES, levelFor } from "@/lib/data";
 import type { GameState, Collaborator, PointEvent } from "@/lib/types";
-import { awardPoints, deductPoints, directRedeem, undoEvent, testConnection, resolveRedemption, addPrize, updatePrize, removePrize, publishAnnouncement } from "@/lib/actions";
+import { awardPoints, deductPoints, directRedeem, undoEvent, testConnection, resolveRedemption, addPrize, updatePrize, removePrize, publishAnnouncement, toggleAnnouncementAction, deleteAnnouncementAction, saveCompanyAction, saveAppearanceAction } from "@/lib/actions";
+import { logoutPin } from "@/lib/auth";
 import PixelAvatar from "@/components/PixelAvatar";
 import Podium from "@/components/Podium";
 import Track from "@/components/Track";
@@ -83,6 +84,12 @@ export default function Master() {
 
   function humanError(e?: string) {
     switch (e) {
+      case "no_autorizado":
+        return "No autorizado — vuelve a entrar con el PIN del Master.";
+      case "pin_no_configurado":
+        return "PIN no configurado — pon MASTER_PIN en Vercel > Settings > Environment Variables y haz Redeploy.";
+      case "pin_incorrecto":
+        return "PIN incorrecto, intenta de nuevo.";
       case "supabase_no_configurado":
         return "Supabase no conectado en Vercel — los botones no guardan puntos. Ve a Vercel > Settings > Environment Variables, pon las 3 llaves y haz Redeploy.";
       case "out_of_stock":
@@ -157,6 +164,14 @@ export default function Master() {
       else showMsg("err", humanError(res.error));
     } catch (e) {
       showMsg("err", `Error al probar la conexión: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function doLogout() {
+    try {
+      await logoutPin();
+    } finally {
+      window.location.href = "/master-login";
     }
   }
 
@@ -264,8 +279,8 @@ export default function Master() {
   }
   async function toggleAnnouncement(table: "announcements" | "crow_announcements", id: number, active: boolean) {
     try {
-      const { error } = await supabase.from(table).update({ active: !active }).eq("id", id);
-      if (error) { showMsg("err", `Error: ${error.message}`); return; }
+      const res = await toggleAnnouncementAction(table, id, active);
+      if (!res.ok) { showMsg("err", humanError(res.error)); return; }
       await refresh();
       showMsg("ok", active ? "Comunicado apagado" : "Comunicado prendido");
     } catch (e) {
@@ -275,8 +290,8 @@ export default function Master() {
   async function deleteAnnouncement(table: "announcements" | "crow_announcements", id: number) {
     if (!confirm("¿Borrar este comunicado?")) return;
     try {
-      const { error } = await supabase.from(table).delete().eq("id", id);
-      if (error) { showMsg("err", `Error: ${error.message}`); return; }
+      const res = await deleteAnnouncementAction(table, id);
+      if (!res.ok) { showMsg("err", humanError(res.error)); return; }
       await refresh();
       showMsg("ok", "Comunicado borrado");
     } catch (e) {
@@ -299,8 +314,8 @@ export default function Master() {
   }
   async function saveCompany() {
     try {
-      const { error } = await supabase.from("settings").update({ company_name: companyName }).eq("id", 1);
-      if (error) { showMsg("err", `Error: ${error.message}`); return; }
+      const res = await saveCompanyAction(companyName);
+      if (!res.ok) { showMsg("err", humanError(res.error)); return; }
       setState((s) => ({ ...s, settings: { ...s.settings, company_name: companyName } }));
       showMsg("ok", "Nombre de la empresa guardado");
     } catch (e) {
@@ -309,8 +324,8 @@ export default function Master() {
   }
   async function saveAppearance(theme: string, season: string) {
     try {
-      const { error } = await supabase.from("settings").update({ theme, season }).eq("id", 1);
-      if (error) { showMsg("err", `Error: ${error.message}`); return; }
+      const res = await saveAppearanceAction(theme, season);
+      if (!res.ok) { showMsg("err", humanError(res.error)); return; }
       setState((s) => ({ ...s, settings: { ...s.settings, theme: theme as never, season: season as never } }));
       showMsg("ok", "Entorno actualizado: se ve igual en las dos vistas.");
     } catch (e) {
@@ -413,6 +428,7 @@ export default function Master() {
         <div className="mb-5 flex flex-wrap items-center gap-2">
           <button type="button" onClick={doTestConnection} className={btnPrimary}>PROBAR CONEXIÓN</button>
           <span className="text-sm text-[var(--dim)]">Comprueba si Vercel llega a Supabase y cuántos colaboradores hay.</span>
+          <button type="button" onClick={doLogout} className="ml-auto rounded-md border-2 border-[var(--red)] px-4 py-2 font-pixel text-[11px] text-[var(--red)]">SALIR / CERRAR SESIÓN</button>
         </div>
         {msg && (
           <div className={`mb-5 rounded-md border-2 px-4 py-3 text-sm font-bold ${msgKind === "err" ? "border-red-500 bg-red-500/15 text-red-700 dark:text-red-300" : "border-green-600 bg-green-500/15 text-green-800 dark:text-green-300"}`} role="status">
