@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { ACTIONS, PENALTIES, COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, THEMES, AVATAR_NAMES, levelFor } from "@/lib/data";
 import type { GameState, Collaborator, PointEvent, ActionType, PenaltyType } from "@/lib/types";
-import { awardPoints, deductPoints, directRedeem, undoEvent, testConnection, resolveRedemption, addPrize, updatePrize, removePrize, publishAnnouncement, toggleAnnouncementAction, deleteAnnouncementAction, saveCompanyAction, saveAppearanceAction, addActionType, updateActionType, removeActionType, addCollaborator, updateCollaborator, removeCollaborator, addPenaltyType, updatePenaltyType, removePenaltyType } from "@/lib/actions";
+import { awardPoints, deductPoints, directRedeem, undoEvent, testConnection, resolveRedemption, addPrize, updatePrize, removePrize, publishAnnouncement, toggleAnnouncementAction, deleteAnnouncementAction, saveCompanyAction, saveAppearanceAction, addActionType, updateActionType, removeActionType, addCollaborator, updateCollaborator, removeCollaborator, addPenaltyType, updatePenaltyType, removePenaltyType, setCompanyLogo, removeCompanyLogo } from "@/lib/actions";
 import { logoutPin } from "@/lib/auth";
 import PixelAvatar from "@/components/PixelAvatar";
 import TierBadge from "@/components/TierBadge";
@@ -32,6 +32,20 @@ function timeAgo(iso: string) {
 }
 
 const inputCls = "min-h-10 rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-sm text-[var(--text)]";
+
+// Convierte un archivo a base64 (igual que fileToBase64 del Master
+// original): lee el archivo como data URL y separa el mime del contenido.
+async function fileToBase64(file: File): Promise<{ dataBase64: string; mimeType: string }> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo."));
+    reader.readAsDataURL(file);
+  });
+  const [head, dataBase64 = ""] = dataUrl.split(",", 2);
+  const mimeType = head.match(/^data:([^;]+);base64$/)?.[1] ?? file.type;
+  return { dataBase64, mimeType };
+}
 const btnPrimary = "min-h-11 rounded-md border-2 border-[var(--accent)] bg-[var(--surface-alt)] px-4 py-2 font-pixel text-[11px] text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40";
 const btnDanger = "min-h-9 rounded-md border-2 border-[var(--red)] px-3 py-1 text-xs font-bold text-[var(--red)] disabled:opacity-40";
 const PRIZE_ICON: Record<number, string> = { 1: "gift", 2: "gift", 3: "game", 4: "console", 5: "tv", 6: "console" };
@@ -95,6 +109,9 @@ export default function Master() {
   const [msg, setMsg] = useState("");
   const [msgKind, setMsgKind] = useState<"ok" | "err" | "">("");
   const [companyName, setCompanyName] = useState(SETTINGS_SEED.company_name);
+  // Logo de la empresa (TU EMPRESA)
+  const [logoMsg, setLogoMsg] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   // Publicar comunicado
   const [pubTitle, setPubTitle] = useState<Record<string, string>>({});
   const [pubBody, setPubBody] = useState<Record<string, string>>({});
@@ -381,6 +398,46 @@ export default function Master() {
       showMsg("ok", "Nombre de la empresa guardado");
     } catch (e) {
       showMsg("err", `Error al guardar la empresa: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  // Logo de la empresa (TU EMPRESA, como el Master original): valida
+  // tipo y peso (máx 2.5 MB), lo convierte a base64 y lo guarda en Supabase.
+  const LOGO_MIMES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+  async function handleLogoFile(file: File) {
+    if (!LOGO_MIMES.includes(file.type)) {
+      setLogoMsg("Ese archivo no es una imagen válida (PNG, JPG, WebP o GIF).");
+      return;
+    }
+    if (file.size > 2_500_000) {
+      setLogoMsg("La imagen pesa más de 2.5 MB; usa una más ligera.");
+      return;
+    }
+    setUploading(true);
+    setLogoMsg(null);
+    try {
+      const { dataBase64, mimeType } = await fileToBase64(file);
+      if (!LOGO_MIMES.includes(mimeType)) {
+        setLogoMsg("Ese formato de imagen no se puede usar como logo.");
+        return;
+      }
+      const res = await setCompanyLogo(dataBase64, mimeType);
+      if (!res.ok) { setLogoMsg(humanError(res.error)); return; }
+      setLogoMsg("Logo actualizado.");
+      await refresh();
+    } catch {
+      setLogoMsg("No se pudo subir el logo. Inténtalo de nuevo.");
+    } finally {
+      setUploading(false);
+    }
+  }
+  async function doRemoveLogo() {
+    try {
+      const res = await removeCompanyLogo();
+      if (!res.ok) { setLogoMsg(humanError(res.error)); return; }
+      setLogoMsg("Logo eliminado.");
+      await refresh();
+    } catch {
+      setLogoMsg("No se pudo quitar el logo. Inténtalo de nuevo.");
     }
   }
   async function saveAppearance(theme: string, season: string) {
@@ -989,7 +1046,40 @@ export default function Master() {
             ) : (
               <p className="text-sm text-[var(--dim)]">Sin logo todavía.</p>
             )}
+            <label
+              className="inline-flex min-h-11 cursor-pointer items-center rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] px-4 py-2 text-sm font-bold text-[var(--text)]"
+              aria-label="Subir logo de la empresa"
+            >
+              {uploading ? "Subiendo…" : "Subir logo"}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="sr-only"
+                aria-label="Elegir archivo de logo"
+                disabled={uploading}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) void handleLogoFile(file);
+                }}
+              />
+            </label>
+            {state.settings.logo_url && (
+              <button
+                type="button"
+                className={btnDanger}
+                aria-label="Quitar el logo de la empresa"
+                onClick={() => doRemoveLogo()}
+              >
+                Quitar logo
+              </button>
+            )}
           </div>
+          {logoMsg && (
+            <p role="status" className="mt-3 text-sm font-semibold text-[var(--text)]">
+              {logoMsg}
+            </p>
+          )}
         </section>
 
         {/* Entorno y temporada */}

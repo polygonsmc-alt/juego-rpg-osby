@@ -448,6 +448,45 @@ export async function saveCompanyAction(companyName: string) {
     return { ok: true as const };
   } catch (e) { return { ok: false as const, error: errText(e) }; }
 }
+// --- Logo de la empresa (Master: TU EMPRESA) ---
+// El logo se guarda como data URL en settings.logo_url (columna text,
+// sin límite práctico para una imagen de 2.5 MB en base64, ~3.3 MB de
+// texto). Igual que el Master original: máx 2.5 MB, solo PNG/JPG/WebP/GIF.
+const LOGO_MIMES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+const LOGO_MAX_BYTES = 2_500_000;
+export async function setCompanyLogo(dataBase64: string, mimeType: string) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  if (!(LOGO_MIMES as readonly string[]).includes(mimeType)) {
+    return { ok: false as const, error: "Ese archivo no es una imagen válida (PNG, JPG, WebP o GIF)." };
+  }
+  if (!dataBase64 || !/^[A-Za-z0-9+/=]+$/.test(dataBase64)) {
+    return { ok: false as const, error: "Ese archivo no es una imagen válida (PNG, JPG, WebP o GIF)." };
+  }
+  // Tamaño del archivo original aproximado desde el base64 (3 bytes por
+  // cada 4 caracteres): rechazar lo que pase de 2.5 MB.
+  if (Math.floor((dataBase64.length * 3) / 4) > LOGO_MAX_BYTES) {
+    return { ok: false as const, error: "La imagen pesa más de 2.5 MB; usa una más ligera." };
+  }
+  try {
+    const db = supabaseAdmin();
+    const { error } = await db.from("settings").update({ logo_url: `data:${mimeType};base64,${dataBase64}` }).eq("id", 1);
+    if (error) throw new Error(error.message);
+    return { ok: true as const };
+  } catch (e) { return { ok: false as const, error: errText(e) }; }
+}
+export async function removeCompanyLogo() {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  try {
+    const db = supabaseAdmin();
+    const { error } = await db.from("settings").update({ logo_url: null }).eq("id", 1);
+    if (error) throw new Error(error.message);
+    return { ok: true as const };
+  } catch (e) { return { ok: false as const, error: errText(e) }; }
+}
 export async function saveAppearanceAction(theme: string, season: string) {
   const auth = await requireMasterAuth();
   if (auth) return auth;
