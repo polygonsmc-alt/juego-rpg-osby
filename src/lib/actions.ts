@@ -378,14 +378,29 @@ export async function removePenaltyType(id: number) {
 }
 
 // --- Gestión de premios y comunicados (Master) ---
+// La tabla prizes tiene id bigint primary key SIN identity, por eso al
+// agregar se calcula el siguiente id (max + 1), igual que addActionType
+// y addPenaltyType. Antes se insertaba sin id y Postgres lo rechazaba
+// con "null value in column id violates not-null constraint": el botón
+// AGREGAR parecía no hacer nada porque el premio nunca se creaba.
+function validPrize(name: string, cost: number, stock: number): string | null {
+  if (!name.trim()) return "Escribe el nombre del premio.";
+  if (!Number.isInteger(cost) || cost <= 0) return "El costo debe ser un número entero mayor que 0.";
+  if (!Number.isInteger(stock) || stock < 0) return "El stock debe ser un número entero de 0 o más.";
+  return null;
+}
 export async function addPrize(name: string, cost: number, stock: number) {
   const auth = await requireMasterAuth();
   if (auth) return auth;
   if (!isSupabaseConfigured) return notConfigured();
+  const bad = validPrize(name, cost, stock);
+  if (bad) return { ok: false as const, error: bad };
   try {
     const db = supabaseAdmin();
-    dbErr(await db.from("prizes").insert({ name, cost, stock }).select("id"));
-    return { ok: true as const };
+    const { data: last } = await db.from("prizes").select("id").order("id", { ascending: false }).limit(1);
+    const nextId = ((last?.[0]?.id as number | undefined) ?? 0) + 1;
+    dbErr(await db.from("prizes").insert({ id: nextId, name: name.trim(), cost: Math.trunc(cost), stock: Math.trunc(stock) }).select("id"));
+    return { ok: true as const, id: nextId };
   } catch (e) { return { ok: false as const, error: errText(e) }; }
 }
 export async function updatePrize(id: number, fields: { name?: string; cost?: number; stock?: number }) {
