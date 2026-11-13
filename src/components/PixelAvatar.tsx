@@ -38,7 +38,7 @@ function rowsFor(sprite: number): string[] {
   return rows.map((r) => r.padEnd(12, ".").slice(0, 12));
 }
 
-export default function PixelAvatar({ sprite, size = 72, label }: { sprite: number; size?: number; label?: string }) {
+export default function PixelAvatar({ sprite, size = 72, label, animated = false, className = "" }: { sprite: number; size?: number; label?: string; animated?: boolean; className?: string }) {
   const hair = AVATAR_HAIR[sprite % AVATAR_HAIR.length];
   const shirt = AVATAR_SHIRT[sprite % AVATAR_SHIRT.length];
   const rows = rowsFor(sprite);
@@ -50,7 +50,8 @@ export default function PixelAvatar({ sprite, size = 72, label }: { sprite: numb
     <div
       role="img"
       aria-label={label || `Avatar pixel ${sprite}`}
-      style={{ width: size, height: size, display: "grid", gridTemplateColumns: `repeat(12, ${px}px)`, gridTemplateRows: `repeat(12, ${px}px)`, imageRendering: "pixelated" }}
+      className={`${animated ? "animate-walk" : ""} ${className}`}
+      style={{ width: size, height: size, display: "grid", gridTemplateColumns: `repeat(12, ${px}px)`, gridTemplateRows: `repeat(12, ${px}px)`, imageRendering: "pixelated", filter: "drop-shadow(2px 3px 0 rgba(0,0,0,.5))" }}
     >
       {rows.flatMap((row, y) =>
         row.split("").map((ch, x) => (

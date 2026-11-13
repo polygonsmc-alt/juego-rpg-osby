@@ -6,7 +6,7 @@ import type { GameState, Collaborator } from "@/lib/types";
 import { awardPoints, deductPoints, directRedeem, undoEvent } from "@/lib/actions";
 import PixelAvatar from "@/components/PixelAvatar";
 import Podium from "@/components/Podium";
-import Track from "@/components/Track";
+import Track, { Snowfall } from "@/components/Track";
 
 const SEED: GameState = {
   collaborators: COLLABORATORS_SEED, prizes: PRIZES_SEED, events: [], redemptions: [],
@@ -102,16 +102,23 @@ export default function Master() {
 
   const collab = state.collaborators.find((c) => c.id === collabId) || state.collaborators[0];
 
+  const isNavidad = state.settings.season === "navidad";
   return (
-    <main className="min-h-screen bg-[#0f2a1d] p-4 md:p-6 text-white">
-      <header className="mx-auto max-w-6xl">
-        <h1 className="text-2xl font-black">Panel Master — {state.settings.company_name}</h1>
+    <main className="relative min-h-screen overflow-hidden p-4 text-white md:p-6" style={{ background: "linear-gradient(180deg, #071a10 0%, #0f2a1d 30%, #071a10 100%)" }}>
+      {isNavidad && (
+        <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden" aria-hidden>
+          <Snowfall />
+        </div>
+      )}
+      <header className="relative z-10 mx-auto max-w-6xl">
+        <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-2xl border-2 border-yellow-400/60 bg-black/40 text-2xl" aria-hidden>🎮</div>
+        <h1 className="pixel-text text-2xl font-black md:text-3xl">Panel Master — {state.settings.company_name}</h1>
         <p className="opacity-80">Solo Osbed / Master. <a href="/" className="underline">Ver La Carrera</a></p>
         {!isSupabaseConfigured && <p className="mt-2 rounded bg-yellow-400/20 p-2 text-sm">Modo ejemplo: configura NEXT_PUBLIC_SUPABASE_URL y ANON_KEY en .env.local para guardar en Supabase.</p>}
         {msg && <p className="mt-2 rounded bg-emerald-500/20 p-2 text-sm">{msg}</p>}
       </header>
 
-      <div className="mx-auto mt-6 max-w-6xl space-y-6">
+      <div className="relative z-10 mx-auto mt-6 max-w-6xl space-y-6">
         <Podium collaborators={state.collaborators} />
         <Track collaborators={state.collaborators} season={state.settings.season} />
 

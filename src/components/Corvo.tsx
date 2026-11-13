@@ -27,14 +27,14 @@ export default function Corvo({ season = "navidad", size = 96 }: { season?: stri
     G: "#e5e7eb", R: "#dc2626", W: "#ffffff", N: "#8b5a2b",
   };
   return (
-    <div>
-      <div style={{ width: size, height: size, display: "grid", gridTemplateColumns: `repeat(12, ${px}px)`, gridTemplateRows: `repeat(12, ${px}px)`, imageRendering: "pixelated" }}>
+    <div className="animate-corvo text-center">
+      <div style={{ width: size, height: size, display: "grid", gridTemplateColumns: `repeat(12, ${px}px)`, gridTemplateRows: `repeat(12, ${px}px)`, imageRendering: "pixelated", filter: "drop-shadow(2px 3px 0 rgba(0,0,0,.55))", margin: "0 auto" }}>
         {rows.flatMap((row, y) => row.map((ch, x) => (
           <div key={`${y}-${x}`} style={{ width: px, height: px, background: colors[ch] || "transparent" }} />
         )))}
       </div>
       <p style={{ fontSize: 11, textAlign: "center", marginTop: 4 }}>
-        🐦‍⬛ Corvo — RRHH {isNavidad ? "🎅" : isHalloween ? "🎃" : ""}
+        🐦‍⬛ Corvo — RRHH {isNavidad ? "🎅" : isHalloween ? "🎃" : ""} · ¡Caw!
       </p>
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 // Merlín barbón pixel: sombrero puntiagudo, barba blanca larga, bastón.
-// En Navidad: gorro de Santa + túnica roja + trineo. En Halloween: sombrero de bruja morado/naranja.
+// En Navidad: gorro de Santa + túnica roja + trineo con regalos. En Halloween: sombrero de bruja morado/naranja.
 export default function Merlin({ season = "navidad", size = 96 }: { season?: string; size?: number }) {
   const isNavidad = season === "navidad";
   const isHalloween = season === "halloween";
@@ -23,11 +23,15 @@ export default function Merlin({ season = "navidad", size = 96 }: { season?: str
   ];
   const colors: Record<string, string> = { H: hat, S: "#f2c89b", E: "#111", W: "#ffffff", T: tunic, Y: "#8b5a2b" };
   return (
-    <div>
-      <div style={{ width: size, height: size, display: "grid", gridTemplateColumns: `repeat(12, ${px}px)`, gridTemplateRows: `repeat(12, ${px}px)`, imageRendering: "pixelated" }}>
+    <div className="animate-float text-center">
+      <div style={{ width: size, height: size, display: "grid", gridTemplateColumns: `repeat(12, ${px}px)`, gridTemplateRows: `repeat(12, ${px}px)`, imageRendering: "pixelated", filter: "drop-shadow(2px 3px 0 rgba(0,0,0,.55))", margin: "0 auto" }}>
         {rows.flatMap((row, y) => row.map((ch, x) => (
           <div key={`${y}-${x}`} style={{ width: px, height: px, background: colors[ch] || "transparent" }} />
         )))}
+      </div>
+      {/* Trineo con regalos — se desliza */}
+      <div className="animate-sled mt-1 text-center text-2xl leading-none" aria-hidden>
+        🛷<span className="text-lg">🎁🎁🎄</span>
       </div>
       <p style={{ fontSize: 11, textAlign: "center", marginTop: 4 }}>
         🧙 Merlín {isNavidad ? "🎅 con trineo y regalos" : isHalloween ? "🎃 brujo" : ""}
