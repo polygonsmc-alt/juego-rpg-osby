@@ -50,7 +50,7 @@ export default function LaCarrera() {
       supabase.from("settings").select("*").eq("id", 1).single(),
     ]);
     setState((prev) => ({
-      collaborators: (c.data as Collaborator[]) || prev.collaborators,
+      collaborators: ((c.data as Collaborator[]) || prev.collaborators).map((x) => ({ ...x, area: x.area ?? null })),
       action_types: (at.data as GameState["action_types"])?.length ? (at.data as GameState["action_types"]) : prev.action_types,
       penalty_types: prev.penalty_types, // La Carrera no muestra faltas; se conserva el seed
       prizes: p.data || prev.prizes,
@@ -166,6 +166,7 @@ export default function LaCarrera() {
                       <PixelAvatar sprite={p.sprite} points={p.points} size={34} label={p.name} />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-bold text-[var(--text)]">{p.name}</p>
+                        {p.area && <p className="truncate text-xs text-[var(--dim)]">Área: {p.area}</p>}
                         <p className="text-xs text-[var(--dim)]">
                           {next ? `A ${fmt(next.cost - p.points)} pts de: ${next.name}` : "¡Ya le alcanza para el premio mayor!"}
                           {upcoming ? ` · Evoluciona a ${upcoming.name} en ${fmt(upcoming.min)}` : " · Nivel máximo"}

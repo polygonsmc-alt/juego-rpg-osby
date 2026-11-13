@@ -270,33 +270,39 @@ export async function removeActionType(id: number) {
 // --- Colaboradores (Master: COLABORADORES) ---
 // La tabla collaborators tiene id identity: se inserta sin id y Supabase
 // lo genera. El nuevo colaborador empieza en 0 pts, Novato.
-function validCollaborator(name: string, sprite: number): string | null {
+function validCollaborator(name: string, sprite: number, area?: string | null): string | null {
   if (!name.trim()) return "Escribe el nombre del colaborador.";
   if (name.trim().length > 40) return "El nombre no puede pasar de 40 caracteres.";
   if (!Number.isInteger(sprite) || sprite < 0 || sprite > 11) return "El monito debe ser un número entre 0 y 11.";
+  if (area != null && area.trim().length > 40) return "El área no puede pasar de 40 caracteres.";
   return null;
 }
-export async function addCollaborator(name: string, sprite: number) {
+// Área: opcional, se recorta; vacía se guarda como null (sin área todavía).
+function cleanArea(area?: string | null): string | null {
+  const a = (area ?? "").trim();
+  return a ? a : null;
+}
+export async function addCollaborator(name: string, sprite: number, area?: string | null) {
   const auth = await requireMasterAuth();
   if (auth) return auth;
   if (!isSupabaseConfigured) return notConfigured();
-  const bad = validCollaborator(name, sprite);
+  const bad = validCollaborator(name, sprite, area);
   if (bad) return { ok: false as const, error: bad };
   try {
     const db = supabaseAdmin();
-    const ins = dbErr(await db.from("collaborators").insert({ name: name.trim(), sprite }).select("id").single());
+    const ins = dbErr(await db.from("collaborators").insert({ name: name.trim(), sprite, area: cleanArea(area) }).select("id").single());
     return { ok: true as const, id: ins.id as number };
   } catch (e) { return { ok: false as const, error: errText(e) }; }
 }
-export async function updateCollaborator(id: number, name: string, sprite: number) {
+export async function updateCollaborator(id: number, name: string, sprite: number, area?: string | null) {
   const auth = await requireMasterAuth();
   if (auth) return auth;
   if (!isSupabaseConfigured) return notConfigured();
-  const bad = validCollaborator(name, sprite);
+  const bad = validCollaborator(name, sprite, area);
   if (bad) return { ok: false as const, error: bad };
   try {
     const db = supabaseAdmin();
-    dbErr(await db.from("collaborators").update({ name: name.trim(), sprite }).eq("id", id).select("id"));
+    dbErr(await db.from("collaborators").update({ name: name.trim(), sprite, area: cleanArea(area) }).eq("id", id).select("id"));
     return { ok: true as const };
   } catch (e) { return { ok: false as const, error: errText(e) }; }
 }

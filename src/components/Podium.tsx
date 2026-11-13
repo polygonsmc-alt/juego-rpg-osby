@@ -33,6 +33,7 @@ export default function Podium({ collaborators }: { collaborators: Collaborator[
             {isFirst ? "★ 1° LUGAR ★" : "2° LUGAR"}
           </p>
           <h3 className="mt-1.5 truncate text-lg font-bold text-[var(--text)]">{p.name}</h3>
+          {p.area && <p className="truncate text-xs text-[var(--dim)]">Área: {p.area}</p>}
           <p className="font-pixel mt-1 text-sm text-[var(--accent)]">{p.points.toLocaleString("es-MX")} PTS</p>
           <div className="mt-2">
             <TierBadge points={p.points} />

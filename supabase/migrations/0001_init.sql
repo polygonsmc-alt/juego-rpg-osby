@@ -11,6 +11,7 @@ create table if not exists collaborators (
   name text not null,
   sprite int not null default 0 check (sprite >= 0 and sprite <= 11),
   points int not null default 0 check (points >= 0),
+  area text,
   created_at timestamptz not null default now()
 );
 
@@ -150,8 +151,8 @@ insert into penalty_types (id, label, points) values
 on conflict (id) do nothing;
 
 -- Seed: participantes en 0, Novato, empatados
-insert into collaborators (id, name, sprite, points) values
- (1,'FANY MOTA',2,0),(2,'OSBED',0,0),(3,'mayra morua',10,0)
+insert into collaborators (id, name, sprite, points, area) values
+ (1,'FANY MOTA',2,0,'Marketing'),(2,'OSBED',0,0,'Diseño gráfico'),(3,'mayra morua',10,0,'Marketing')
 on conflict (id) do nothing;
 
 -- Seed: premios + stock

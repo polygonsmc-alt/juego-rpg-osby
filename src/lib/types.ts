@@ -6,6 +6,7 @@ export interface Collaborator {
   name: string;
   sprite: number; // 0-11
   points: number; // SOLO numero: puntos actuales
+  area: string | null; // Área/departamento (ej. Ventas) — null = sin área todavía
   created_at?: string;
 }
 

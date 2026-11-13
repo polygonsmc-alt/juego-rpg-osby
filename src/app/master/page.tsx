@@ -135,9 +135,11 @@ export default function Master() {
   // Agregar / editar colaborador (COLABORADORES)
   const [newCollabName, setNewCollabName] = useState("");
   const [newCollabSprite, setNewCollabSprite] = useState(0);
+  const [newCollabArea, setNewCollabArea] = useState("");
   const [editingCollab, setEditingCollab] = useState<number | null>(null);
   const [editCollabName, setEditCollabName] = useState("");
   const [editCollabSprite, setEditCollabSprite] = useState(0);
+  const [editCollabArea, setEditCollabArea] = useState("");
   const [confirmDeleteCollab, setConfirmDeleteCollab] = useState<number | null>(null);
   // Editar / agregar falta (FALTAS Y CASTIGOS) — los puntos se piden en
   // positivo (magnitud) y se guardan negativos, como el seed.
@@ -198,7 +200,7 @@ export default function Master() {
       const err = [c, at, pt, p, e, r, a, ca, s].find((x) => x.error)?.error;
       if (err) { showMsg("err", `Error al cargar desde Supabase: ${err.message}`); return; }
       setState((prev) => ({
-        collaborators: (c.data as Collaborator[]) || prev.collaborators,
+        collaborators: ((c.data as Collaborator[]) || prev.collaborators).map((x) => ({ ...x, area: x.area ?? null })),
         action_types: (at.data as ActionType[])?.length ? (at.data as ActionType[]) : prev.action_types,
         penalty_types: (pt.data as PenaltyType[])?.length ? (pt.data as PenaltyType[]) : prev.penalty_types,
         prizes: p.data || prev.prizes,
@@ -496,9 +498,9 @@ export default function Master() {
     if (!newCollabName.trim()) return;
     setBusy(true);
     try {
-      const res = await addCollaborator(newCollabName.trim(), newCollabSprite);
+      const res = await addCollaborator(newCollabName.trim(), newCollabSprite, newCollabArea);
       if (!res.ok) { showMsg("err", humanError(res.error)); return; }
-      setNewCollabName(""); setNewCollabSprite(0);
+      setNewCollabName(""); setNewCollabSprite(0); setNewCollabArea("");
       await refresh();
       showMsg("ok", `Colaborador agregado: ${newCollabName.trim()} empieza en 0 pts, Novato, y ya aparece en SUMAR PUNTOS, RESTAR PUNTOS y en el canje.`);
     } catch (e) {
@@ -509,7 +511,7 @@ export default function Master() {
     if (!editCollabName.trim()) return;
     setBusy(true);
     try {
-      const res = await updateCollaborator(id, editCollabName.trim(), editCollabSprite);
+      const res = await updateCollaborator(id, editCollabName.trim(), editCollabSprite, editCollabArea);
       if (!res.ok) { showMsg("err", humanError(res.error)); return; }
       setEditingCollab(null);
       await refresh();
@@ -715,6 +717,7 @@ export default function Master() {
           <form className="mt-4 flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); doAddCollaborator(); }}>
             <div className="flex flex-col gap-2 sm:flex-row">
               <input aria-label="Nombre del colaborador" type="text" placeholder="Nombre del colaborador" className={`${inputCls} flex-1`} value={newCollabName} onChange={(e) => setNewCollabName(e.target.value)} />
+              <input aria-label="Área del colaborador" type="text" placeholder="Área (ej. Ventas)" className={`${inputCls} sm:w-48`} value={newCollabArea} onChange={(e) => setNewCollabArea(e.target.value)} />
               <button type="submit" className={btnPrimary} disabled={busy || !newCollabName.trim()}>AGREGAR</button>
             </div>
             <SpritePicker value={newCollabSprite} onChange={setNewCollabSprite} label="Elige su monito" />
@@ -726,6 +729,7 @@ export default function Master() {
                   {editingCollab === p.id ? (
                     <div className="flex flex-col gap-3">
                       <input aria-label={`Nuevo nombre de ${p.name}`} type="text" className={inputCls} value={editCollabName} onChange={(e) => setEditCollabName(e.target.value)} />
+                      <input aria-label={`Nueva área de ${p.name}`} type="text" placeholder="Área (ej. Ventas)" className={inputCls} value={editCollabArea} onChange={(e) => setEditCollabArea(e.target.value)} />
                       <SpritePicker value={editCollabSprite} onChange={setEditCollabSprite} label="Cambiar monito" />
                       <div className="flex gap-2">
                         <button type="button" className={btnPrimary} disabled={busy || !editCollabName.trim()} aria-label={`Guardar cambios de ${p.name}`} onClick={() => doSaveCollaborator(p.id)}>GUARDAR</button>
@@ -737,10 +741,11 @@ export default function Master() {
                       <PixelAvatar sprite={p.sprite} points={p.points} size={36} />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-bold text-[var(--text)]">{p.name}</p>
+                        {p.area && <p className="truncate text-xs text-[var(--dim)]">Área: {p.area}</p>}
                         <p className="text-xs text-[var(--dim)]">{fmt(p.points)} pts · {levelFor(p.points)}</p>
                       </div>
                       <TierBadge points={p.points} />
-                      <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar a ${p.name}`} onClick={() => { setEditingCollab(p.id); setEditCollabName(p.name); setEditCollabSprite(p.sprite); setConfirmDeleteCollab(null); }}>Editar</button>
+                      <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar a ${p.name}`} onClick={() => { setEditingCollab(p.id); setEditCollabName(p.name); setEditCollabSprite(p.sprite); setEditCollabArea(p.area ?? ""); setConfirmDeleteCollab(null); }}>Editar</button>
                       {confirmDeleteCollab === p.id ? (
                         <button type="button" className={btnDanger} disabled={busy} aria-label={`Confirmar eliminar a ${p.name}`} onClick={() => doRemoveCollaborator(p.id, p.name)}>¿Seguro?</button>
                       ) : (

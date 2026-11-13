@@ -59,9 +59,9 @@ export function premioMayor(prizes: Prize[]): Prize | null {
 }
 
 export const COLLABORATORS_SEED: Collaborator[] = [
-  { id: 1, name: "FANY MOTA", sprite: 2, points: 0 },
-  { id: 2, name: "OSBED", sprite: 0, points: 0 },
-  { id: 3, name: "mayra morua", sprite: 10, points: 0 },
+  { id: 1, name: "FANY MOTA", sprite: 2, points: 0, area: "Marketing" },
+  { id: 2, name: "OSBED", sprite: 0, points: 0, area: "Diseño gráfico" },
+  { id: 3, name: "mayra morua", sprite: 10, points: 0, area: "Marketing" },
 ];
 
 export const MERLIN_SEED: Announcement[] = [
