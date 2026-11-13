@@ -21,9 +21,9 @@ export function MerlinBox({ announcements, season, actionLabel }: { announcement
   const active = announcements.filter((a) => a.active);
   if (active.length === 0) return null;
   return (
-    <section aria-label="Comunicados de Merlín" className="flex flex-col gap-3">
+    <section aria-label="Comunicados de Merlín" className="flex h-full flex-col gap-3">
       {active.map((a) => (
-        <article key={a.id} className="panel flex items-start gap-3 p-4" style={{ borderColor: "#6d4fc2" }}>
+        <article key={a.id} className="panel flex flex-1 items-start gap-3 p-4" style={{ borderColor: "#6d4fc2" }}>
           <span className="flex shrink-0 flex-col items-center gap-1">
             <span className="sprite-bob inline-block">
               <Merlin season={season} size={56} caption={false} />
@@ -46,9 +46,9 @@ export function CorvoBox({ announcements, season, actionLabel }: { announcements
   const active = announcements.filter((a) => a.active);
   if (active.length === 0) return null;
   return (
-    <section aria-label="Comunicados del Cuervo de RRHH" className="flex flex-col gap-3">
+    <section aria-label="Comunicados del Cuervo de RRHH" className="flex h-full flex-col gap-3">
       {active.map((a) => (
-        <article key={a.id} className="panel flex items-start gap-3 p-4" style={{ borderColor: "#3d4fa3" }}>
+        <article key={a.id} className="panel flex flex-1 items-start gap-3 p-4" style={{ borderColor: "#3d4fa3" }}>
           <span className="sprite-bob inline-block shrink-0">
             <Corvo season={season} size={60} caption={false} />
           </span>

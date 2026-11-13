@@ -115,6 +115,12 @@ export default function LaCarrera() {
         )}
 
         <div className="flex flex-col gap-6">
+          {/* Merlín y Corvo siempre arriba: lado a lado en escritorio, apilados en móvil */}
+          <div className="grid items-stretch gap-6 md:grid-cols-2">
+            <MerlinBox announcements={state.announcements} season={state.settings.season} actionLabel={actionLabel} />
+            <CorvoBox announcements={state.crow_announcements} season={state.settings.season} actionLabel={actionLabel} />
+          </div>
+
           <Podium collaborators={state.collaborators} />
 
           {/* Canjes realizados */}
@@ -143,9 +149,6 @@ export default function LaCarrera() {
               ¿Ya te alcanza para un premio? Pídelo en persona: <strong className="text-[var(--text)]">solicitar canje en RRHH</strong>. Solo el Master registra el canje y descuenta los puntos.
             </p>
           </section>
-
-          <MerlinBox announcements={state.announcements} season={state.settings.season} actionLabel={actionLabel} />
-          <CorvoBox announcements={state.crow_announcements} season={state.settings.season} actionLabel={actionLabel} />
 
           <Track collaborators={state.collaborators} prizes={state.prizes} season={state.settings.season} />
 
