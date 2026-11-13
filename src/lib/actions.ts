@@ -267,6 +267,110 @@ export async function removeActionType(id: number) {
   } catch (e) { return { ok: false as const, error: errText(e) }; }
 }
 
+// --- Colaboradores (Master: COLABORADORES) ---
+// La tabla collaborators tiene id identity: se inserta sin id y Supabase
+// lo genera. El nuevo colaborador empieza en 0 pts, Novato.
+function validCollaborator(name: string, sprite: number): string | null {
+  if (!name.trim()) return "Escribe el nombre del colaborador.";
+  if (name.trim().length > 40) return "El nombre no puede pasar de 40 caracteres.";
+  if (!Number.isInteger(sprite) || sprite < 0 || sprite > 11) return "El monito debe ser un número entre 0 y 11.";
+  return null;
+}
+export async function addCollaborator(name: string, sprite: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  const bad = validCollaborator(name, sprite);
+  if (bad) return { ok: false as const, error: bad };
+  try {
+    const db = supabaseAdmin();
+    const ins = dbErr(await db.from("collaborators").insert({ name: name.trim(), sprite }).select("id").single());
+    return { ok: true as const, id: ins.id as number };
+  } catch (e) { return { ok: false as const, error: errText(e) }; }
+}
+export async function updateCollaborator(id: number, name: string, sprite: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  const bad = validCollaborator(name, sprite);
+  if (bad) return { ok: false as const, error: bad };
+  try {
+    const db = supabaseAdmin();
+    dbErr(await db.from("collaborators").update({ name: name.trim(), sprite }).eq("id", id).select("id"));
+    return { ok: true as const };
+  } catch (e) { return { ok: false as const, error: errText(e) }; }
+}
+export async function removeCollaborator(id: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  try {
+    const db = supabaseAdmin();
+    // Igual que el Master original: al eliminar a un colaborador se borra
+    // también su historial de movimientos y sus solicitudes de canje.
+    // (En Supabase las FK son ON DELETE CASCADE, así que el borrado del
+    // colaborador también lo haría solo, pero se borra explícito primero,
+    // como en el original.) El stock de un premio ya canjeado por esa
+    // persona NO se devuelve: el original tampoco lo devuelve.
+    dbErr(await db.from("point_events").delete().eq("collaborator_id", id).select("id"));
+    dbErr(await db.from("redemptions").delete().eq("collaborator_id", id).select("id"));
+    dbErr(await db.from("collaborators").delete().eq("id", id).select("id"));
+    return { ok: true as const };
+  } catch (e) { return { ok: false as const, error: errText(e) }; }
+}
+
+// --- Faltas y castigos (Master: FALTAS Y CASTIGOS) ---
+// OJO, convención de esta versión de Vercel (distinta a la del Master
+// original, donde los puntos de la falta se guardan positivos): aquí la
+// tabla penalty_types guarda los puntos NEGATIVOS (seed -50, -30, -15,
+// -10) y deductPoints espera un número negativo para restar. Por eso el
+// Master pide la magnitud en positivo (como el original: "Pts a restar",
+// se muestra −50) y aquí se guarda -magnitud. Cambiar a positivo rompería
+// RESTAR PUNTOS y el seed. La tabla penalty_types tiene id bigint primary
+// key SIN identity, por eso al agregar se calcula max + 1, igual que
+// addActionType. La columna se llama `label`, no `name`.
+function validPenalty(name: string, points: number): string | null {
+  if (!name.trim()) return "Escribe el nombre de la falta.";
+  if (!Number.isInteger(points) || points <= 0) return "Los puntos deben ser un número entero mayor que 0.";
+  return null;
+}
+export async function addPenaltyType(name: string, points: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  const bad = validPenalty(name, points);
+  if (bad) return { ok: false as const, error: bad };
+  try {
+    const db = supabaseAdmin();
+    const { data: last } = await db.from("penalty_types").select("id").order("id", { ascending: false }).limit(1);
+    const nextId = ((last?.[0]?.id as number | undefined) ?? 0) + 1;
+    dbErr(await db.from("penalty_types").insert({ id: nextId, label: name.trim(), points: -Math.trunc(points) }).select("id"));
+    return { ok: true as const, id: nextId };
+  } catch (e) { return { ok: false as const, error: errText(e) }; }
+}
+export async function updatePenaltyType(id: number, name: string, points: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  const bad = validPenalty(name, points);
+  if (bad) return { ok: false as const, error: bad };
+  try {
+    const db = supabaseAdmin();
+    dbErr(await db.from("penalty_types").update({ label: name.trim(), points: -Math.trunc(points) }).eq("id", id).select("id"));
+    return { ok: true as const };
+  } catch (e) { return { ok: false as const, error: errText(e) }; }
+}
+export async function removePenaltyType(id: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  try {
+    const db = supabaseAdmin();
+    dbErr(await db.from("penalty_types").delete().eq("id", id).select("id"));
+    return { ok: true as const };
+  } catch (e) { return { ok: false as const, error: errText(e) }; }
+}
+
 // --- Gestión de premios y comunicados (Master) ---
 export async function addPrize(name: string, cost: number, stock: number) {
   const auth = await requireMasterAuth();

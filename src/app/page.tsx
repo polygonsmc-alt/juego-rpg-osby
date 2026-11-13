@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, ACTIONS, nextLevel } from "@/lib/data";
+import { COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, ACTIONS, PENALTIES, nextLevel } from "@/lib/data";
 import type { GameState, Collaborator } from "@/lib/types";
 import Podium from "@/components/Podium";
 import Track from "@/components/Track";
@@ -13,6 +13,7 @@ import TierBadge from "@/components/TierBadge";
 const SEED_STATE: GameState = {
   collaborators: COLLABORATORS_SEED,
   action_types: ACTIONS,
+  penalty_types: PENALTIES,
   prizes: PRIZES_SEED,
   events: [],
   redemptions: [],
@@ -51,6 +52,7 @@ export default function LaCarrera() {
     setState((prev) => ({
       collaborators: (c.data as Collaborator[]) || prev.collaborators,
       action_types: (at.data as GameState["action_types"])?.length ? (at.data as GameState["action_types"]) : prev.action_types,
+      penalty_types: prev.penalty_types, // La Carrera no muestra faltas; se conserva el seed
       prizes: p.data || prev.prizes,
       events: e.data || prev.events,
       redemptions: r.data || prev.redemptions,

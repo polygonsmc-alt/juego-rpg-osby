@@ -1,19 +1,20 @@
 "use client";
 import { useEffect, useState } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { ACTIONS, PENALTIES, COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, THEMES, levelFor } from "@/lib/data";
-import type { GameState, Collaborator, PointEvent, ActionType } from "@/lib/types";
-import { awardPoints, deductPoints, directRedeem, undoEvent, testConnection, resolveRedemption, addPrize, updatePrize, removePrize, publishAnnouncement, toggleAnnouncementAction, deleteAnnouncementAction, saveCompanyAction, saveAppearanceAction, addActionType, updateActionType, removeActionType } from "@/lib/actions";
+import { ACTIONS, PENALTIES, COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, THEMES, AVATAR_NAMES, levelFor } from "@/lib/data";
+import type { GameState, Collaborator, PointEvent, ActionType, PenaltyType } from "@/lib/types";
+import { awardPoints, deductPoints, directRedeem, undoEvent, testConnection, resolveRedemption, addPrize, updatePrize, removePrize, publishAnnouncement, toggleAnnouncementAction, deleteAnnouncementAction, saveCompanyAction, saveAppearanceAction, addActionType, updateActionType, removeActionType, addCollaborator, updateCollaborator, removeCollaborator, addPenaltyType, updatePenaltyType, removePenaltyType } from "@/lib/actions";
 import { logoutPin } from "@/lib/auth";
 import PixelAvatar from "@/components/PixelAvatar";
+import TierBadge from "@/components/TierBadge";
 import Podium from "@/components/Podium";
 import Track from "@/components/Track";
-import { PrizeIcon, SeasonIcon } from "@/components/sprites";
+import { PrizeIcon, SeasonIcon, AvatarSprite, SPRITE_COUNT } from "@/components/sprites";
 import Merlin from "@/components/Merlin";
 import Corvo from "@/components/Corvo";
 
 const SEED: GameState = {
-  collaborators: COLLABORATORS_SEED, action_types: ACTIONS, prizes: PRIZES_SEED, events: [], redemptions: [],
+  collaborators: COLLABORATORS_SEED, action_types: ACTIONS, penalty_types: PENALTIES, prizes: PRIZES_SEED, events: [], redemptions: [],
   announcements: MERLIN_SEED, crow_announcements: CORVO_SEED, settings: SETTINGS_SEED,
 };
 
@@ -48,6 +49,33 @@ const SEASON_OPTIONS = [
   { key: "primavera", label: "Primavera", icon: "flower", hint: "Flores por la pista y en el sombrero de Merlín." },
   { key: "verano", label: "Verano", icon: "sun", hint: "Sol, sombrillas y Merlín con sombrero de paja y lentes de sol." },
 ];
+
+// Selector de monito (12 sprites, como el Master original): 0-7 base,
+// 8-11 mujeres (coleta larga, moño alto, pelo largo ondulado, trenza).
+function SpritePicker({ value, onChange, label }: { value: number; onChange: (n: number) => void; label: string }) {
+  return (
+    <div>
+      <span className="mb-2 block text-sm font-semibold text-[var(--text)]">{label}</span>
+      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={label}>
+        {Array.from({ length: SPRITE_COUNT }, (_, i) => (
+          <button
+            key={i}
+            type="button"
+            role="radio"
+            aria-checked={value === i}
+            aria-label={`Monito ${AVATAR_NAMES[i] ?? `estilo ${i + 1}`}`}
+            title={AVATAR_NAMES[i] ?? `Estilo ${i + 1}`}
+            onClick={() => onChange(i)}
+            className="flex min-h-12 min-w-12 items-center justify-center rounded-md border-2 p-1"
+            style={{ borderColor: value === i ? "var(--accent)" : "var(--border)", background: value === i ? "var(--surface-alt)" : "transparent" }}
+          >
+            <AvatarSprite sprite={i} tierIdx={0} size={30} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function Master() {
   const [state, setState] = useState<GameState>(SEED);
@@ -87,6 +115,20 @@ export default function Master() {
   const [editActionPoints, setEditActionPoints] = useState("");
   const [newActionName, setNewActionName] = useState("");
   const [newActionPoints, setNewActionPoints] = useState("");
+  // Agregar / editar colaborador (COLABORADORES)
+  const [newCollabName, setNewCollabName] = useState("");
+  const [newCollabSprite, setNewCollabSprite] = useState(0);
+  const [editingCollab, setEditingCollab] = useState<number | null>(null);
+  const [editCollabName, setEditCollabName] = useState("");
+  const [editCollabSprite, setEditCollabSprite] = useState(0);
+  const [confirmDeleteCollab, setConfirmDeleteCollab] = useState<number | null>(null);
+  // Editar / agregar falta (FALTAS Y CASTIGOS) — los puntos se piden en
+  // positivo (magnitud) y se guardan negativos, como el seed.
+  const [editingPenalty, setEditingPenalty] = useState<number | null>(null);
+  const [editPenaltyName, setEditPenaltyName] = useState("");
+  const [editPenaltyPoints, setEditPenaltyPoints] = useState("");
+  const [newPenaltyName, setNewPenaltyName] = useState("");
+  const [newPenaltyPoints, setNewPenaltyPoints] = useState("");
 
   function humanError(e?: string) {
     switch (e) {
@@ -125,9 +167,10 @@ export default function Master() {
   async function load() {
     if (!isSupabaseConfigured) return;
     try {
-      const [c, at, p, e, r, a, ca, s] = await Promise.all([
+      const [c, at, pt, p, e, r, a, ca, s] = await Promise.all([
         supabase.from("collaborators").select("*").order("id"),
         supabase.from("action_types").select("*").order("id"),
+        supabase.from("penalty_types").select("*").order("id"),
         supabase.from("prizes").select("*").order("cost"),
         supabase.from("point_events").select("*").order("created_at", { ascending: false }).limit(50),
         supabase.from("redemptions").select("*").order("created_at", { ascending: false }),
@@ -135,11 +178,12 @@ export default function Master() {
         supabase.from("crow_announcements").select("*").order("id"),
         supabase.from("settings").select("*").eq("id", 1).single(),
       ]);
-      const err = [c, at, p, e, r, a, ca, s].find((x) => x.error)?.error;
+      const err = [c, at, pt, p, e, r, a, ca, s].find((x) => x.error)?.error;
       if (err) { showMsg("err", `Error al cargar desde Supabase: ${err.message}`); return; }
       setState((prev) => ({
         collaborators: (c.data as Collaborator[]) || prev.collaborators,
         action_types: (at.data as ActionType[])?.length ? (at.data as ActionType[]) : prev.action_types,
+        penalty_types: (pt.data as PenaltyType[])?.length ? (pt.data as PenaltyType[]) : prev.penalty_types,
         prizes: p.data || prev.prizes,
         events: e.data || prev.events,
         redemptions: r.data || prev.redemptions,
@@ -168,6 +212,11 @@ export default function Master() {
   // usa el seed. SUMAR PUNTOS y los bonos usan esta lista, así una acción
   // nueva o editada aparece y vale lo nuevo de inmediato.
   const actions: ActionType[] = state.action_types?.length ? state.action_types : ACTIONS;
+  // Catálogo de faltas cargado de Supabase (penalty_types); en modo ejemplo
+  // usa el seed. RESTAR PUNTOS usa esta lista, así una falta nueva o
+  // editada aparece y resta lo nuevo de inmediato. Los puntos se guardan
+  // negativos (-50) y se muestran como −50.
+  const penalties: PenaltyType[] = state.penalty_types?.length ? state.penalty_types : PENALTIES;
 
   async function doTestConnection() {
     try {
@@ -385,6 +434,87 @@ export default function Master() {
     } finally { setBusy(false); }
   }
 
+  // COLABORADORES — agregar / editar / eliminar colaboradores
+  async function doAddCollaborator() {
+    if (!newCollabName.trim()) return;
+    setBusy(true);
+    try {
+      const res = await addCollaborator(newCollabName.trim(), newCollabSprite);
+      if (!res.ok) { showMsg("err", humanError(res.error)); return; }
+      setNewCollabName(""); setNewCollabSprite(0);
+      await refresh();
+      showMsg("ok", `Colaborador agregado: ${newCollabName.trim()} empieza en 0 pts, Novato, y ya aparece en SUMAR PUNTOS, RESTAR PUNTOS y en el canje.`);
+    } catch (e) {
+      showMsg("err", `Error al agregar al colaborador: ${e instanceof Error ? e.message : String(e)}`);
+    } finally { setBusy(false); }
+  }
+  async function doSaveCollaborator(id: number) {
+    if (!editCollabName.trim()) return;
+    setBusy(true);
+    try {
+      const res = await updateCollaborator(id, editCollabName.trim(), editCollabSprite);
+      if (!res.ok) { showMsg("err", humanError(res.error)); return; }
+      setEditingCollab(null);
+      await refresh();
+      showMsg("ok", "Colaborador guardado");
+    } catch (e) {
+      showMsg("err", `Error al guardar al colaborador: ${e instanceof Error ? e.message : String(e)}`);
+    } finally { setBusy(false); }
+  }
+  async function doRemoveCollaborator(id: number, name: string) {
+    setBusy(true);
+    try {
+      const res = await removeCollaborator(id);
+      if (!res.ok) { showMsg("err", humanError(res.error)); return; }
+      setConfirmDeleteCollab(null);
+      await refresh();
+      showMsg("ok", `Colaborador eliminado: ${name}. Su historial y sus canjes también se borraron, como en el Master original.`);
+    } catch (e) {
+      showMsg("err", `Error al eliminar al colaborador: ${e instanceof Error ? e.message : String(e)}`);
+    } finally { setBusy(false); }
+  }
+
+  // FALTAS Y CASTIGOS — agregar / editar / eliminar faltas del catálogo.
+  // Los puntos se piden en positivo (magnitud) y se guardan negativos.
+  async function doAddPenalty() {
+    if (!newPenaltyName.trim() || !(Number(newPenaltyPoints) > 0)) return;
+    setBusy(true);
+    try {
+      const res = await addPenaltyType(newPenaltyName.trim(), Math.trunc(Number(newPenaltyPoints)));
+      if (!res.ok) { showMsg("err", humanError(res.error)); return; }
+      setNewPenaltyName(""); setNewPenaltyPoints("");
+      await refresh();
+      showMsg("ok", "Falta agregada: ya aparece en RESTAR PUNTOS");
+    } catch (e) {
+      showMsg("err", `Error al agregar la falta: ${e instanceof Error ? e.message : String(e)}`);
+    } finally { setBusy(false); }
+  }
+  async function doSavePenalty(id: number) {
+    if (!editPenaltyName.trim() || !(Number(editPenaltyPoints) > 0)) return;
+    setBusy(true);
+    try {
+      const res = await updatePenaltyType(id, editPenaltyName.trim(), Math.trunc(Number(editPenaltyPoints)));
+      if (!res.ok) { showMsg("err", humanError(res.error)); return; }
+      setEditingPenalty(null);
+      await refresh();
+      showMsg("ok", "Falta guardada");
+    } catch (e) {
+      showMsg("err", `Error al guardar la falta: ${e instanceof Error ? e.message : String(e)}`);
+    } finally { setBusy(false); }
+  }
+  async function doRemovePenalty(id: number, label: string) {
+    if (!confirm(`¿Eliminar la falta «${label}»? Ya no aparecerá en RESTAR PUNTOS.`)) return;
+    setBusy(true);
+    try {
+      const res = await removePenaltyType(id);
+      if (!res.ok) { showMsg("err", humanError(res.error)); return; }
+      await refresh();
+      showMsg("ok", "Falta eliminada");
+    } catch (e) {
+      showMsg("err", `Error al eliminar la falta: ${e instanceof Error ? e.message : String(e)}`);
+    } finally { setBusy(false); }
+  }
+
   const undoable = state.events.filter((e) => !e.reversed && e.kind !== "reversal");
   const lastUndoable = undoable[0] ?? null;
   const shownEvents = state.events.slice(0, 12);
@@ -521,6 +651,53 @@ export default function Master() {
           {collab && <div className="mt-3 flex items-center gap-2"><PixelAvatar sprite={collab.sprite} points={collab.points} size={40} /><span>{collab.name} — {collab.points} pts</span></div>}
         </section>
 
+        {/* Colaboradores — como el Master: agregar, editar y eliminar colaboradores con su monito */}
+        <section aria-label="Colaboradores" className="panel p-4 sm:p-5">
+          <h2 className="font-pixel text-sm text-[var(--text)]">COLABORADORES</h2>
+          <p className="mt-2 text-sm text-[var(--dim)]">El nuevo colaborador empieza en 0 pts, Novato, y aparece de inmediato en SUMAR PUNTOS, RESTAR PUNTOS, en el canje y en La Carrera.</p>
+          <form className="mt-4 flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); doAddCollaborator(); }}>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input aria-label="Nombre del colaborador" type="text" placeholder="Nombre del colaborador" className={`${inputCls} flex-1`} value={newCollabName} onChange={(e) => setNewCollabName(e.target.value)} />
+              <button type="submit" className={btnPrimary} disabled={busy || !newCollabName.trim()}>AGREGAR</button>
+            </div>
+            <SpritePicker value={newCollabSprite} onChange={setNewCollabSprite} label="Elige su monito" />
+          </form>
+          {state.collaborators.length > 0 && (
+            <ul className="mt-4 flex flex-col divide-y divide-[var(--border)]">
+              {state.collaborators.map((p) => (
+                <li key={p.id} className="py-3">
+                  {editingCollab === p.id ? (
+                    <div className="flex flex-col gap-3">
+                      <input aria-label={`Nuevo nombre de ${p.name}`} type="text" className={inputCls} value={editCollabName} onChange={(e) => setEditCollabName(e.target.value)} />
+                      <SpritePicker value={editCollabSprite} onChange={setEditCollabSprite} label="Cambiar monito" />
+                      <div className="flex gap-2">
+                        <button type="button" className={btnPrimary} disabled={busy || !editCollabName.trim()} aria-label={`Guardar cambios de ${p.name}`} onClick={() => doSaveCollaborator(p.id)}>GUARDAR</button>
+                        <button type="button" className="min-h-11 rounded-md border-2 border-[var(--border)] px-4 py-2 text-sm font-bold text-[var(--dim)]" onClick={() => setEditingCollab(null)}>Cancelar</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <PixelAvatar sprite={p.sprite} points={p.points} size={36} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-bold text-[var(--text)]">{p.name}</p>
+                        <p className="text-xs text-[var(--dim)]">{fmt(p.points)} pts · {levelFor(p.points)}</p>
+                      </div>
+                      <TierBadge points={p.points} />
+                      <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar a ${p.name}`} onClick={() => { setEditingCollab(p.id); setEditCollabName(p.name); setEditCollabSprite(p.sprite); setConfirmDeleteCollab(null); }}>Editar</button>
+                      {confirmDeleteCollab === p.id ? (
+                        <button type="button" className={btnDanger} disabled={busy} aria-label={`Confirmar eliminar a ${p.name}`} onClick={() => doRemoveCollaborator(p.id, p.name)}>¿Seguro?</button>
+                      ) : (
+                        <button type="button" className={btnDanger} aria-label={`Eliminar a ${p.name}`} onClick={() => setConfirmDeleteCollab(p.id)}>Eliminar</button>
+                      )}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-3 text-xs text-[var(--dim)]">Al eliminar a un colaborador se borra también su historial de puntos y sus canjes, como en el Master original. El stock de un premio que ya canjeó no se devuelve.</p>
+        </section>
+
         {/* Acciones y puntos — como el Master: editar, agregar y eliminar acciones */}
         <section aria-label="Acciones que dan puntos" className="panel p-4 sm:p-5">
           <h2 className="font-pixel text-sm text-[var(--text)]">ACCIONES Y PUNTOS</h2>
@@ -550,6 +727,38 @@ export default function Master() {
             <input aria-label="Nombre de la nueva acción" type="text" placeholder="Nueva acción (ej. Meta semanal cumplida)" className={`${inputCls} flex-1`} value={newActionName} onChange={(e) => setNewActionName(e.target.value)} />
             <input aria-label="Puntos de la nueva acción" type="number" inputMode="numeric" placeholder="Pts" className={`${inputCls} sm:w-28`} value={newActionPoints} onChange={(e) => setNewActionPoints(e.target.value)} />
             <button type="submit" className={btnPrimary} disabled={busy || !newActionName.trim() || !(Number(newActionPoints) > 0)}>AGREGAR</button>
+          </form>
+        </section>
+
+        {/* Faltas y castigos — como el Master: editar, agregar y eliminar faltas */}
+        <section aria-label="Faltas que restan puntos" className="panel p-4 sm:p-5">
+          <h2 className="font-pixel text-sm text-[var(--text)]">FALTAS Y CASTIGOS</h2>
+          <p className="mt-2 text-sm text-[var(--dim)]">Estas son las faltas que aparecen en RESTAR PUNTOS. Los puntos se escriben en positivo y se restan: si cambias una falta a 20, el botón de RESTAR PUNTOS quita 20.</p>
+          <ul className="mt-3 flex flex-col divide-y divide-[var(--border)]">
+            {penalties.map((pen) => (
+              <li key={pen.id} className="py-2.5">
+                {editingPenalty === pen.id ? (
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input aria-label="Nombre de la falta" type="text" className={`${inputCls} flex-1`} value={editPenaltyName} onChange={(e) => setEditPenaltyName(e.target.value)} />
+                    <input aria-label="Puntos que resta la falta" type="number" inputMode="numeric" className={`${inputCls} sm:w-28`} value={editPenaltyPoints} onChange={(e) => setEditPenaltyPoints(e.target.value)} />
+                    <button type="button" className={btnPrimary} disabled={busy || !editPenaltyName.trim() || !(Number(editPenaltyPoints) > 0)} aria-label={`Guardar falta ${pen.label}`} onClick={() => doSavePenalty(pen.id)}>GUARDAR</button>
+                    <button type="button" className="min-h-11 rounded-md border-2 border-[var(--border)] px-4 py-2 text-sm font-bold text-[var(--dim)]" onClick={() => setEditingPenalty(null)}>Cancelar</button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <p className="min-w-0 flex-1 text-sm text-[var(--text)]">{pen.label}</p>
+                    <span className="font-pixel shrink-0 text-[11px]" style={{ color: "var(--red)" }}>−{fmt(Math.abs(pen.points))}</span>
+                    <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar falta ${pen.label}`} onClick={() => { setEditingPenalty(pen.id); setEditPenaltyName(pen.label); setEditPenaltyPoints(String(Math.abs(pen.points))); }}>Editar</button>
+                    <button type="button" className={btnDanger} disabled={busy} aria-label={`Eliminar falta ${pen.label}`} onClick={() => doRemovePenalty(pen.id, pen.label)}>Eliminar</button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+          <form className="mt-4 flex flex-col gap-2 border-t-2 border-dashed border-[var(--border)] pt-4 sm:flex-row" onSubmit={(e) => { e.preventDefault(); doAddPenalty(); }}>
+            <input aria-label="Nombre de la nueva falta" type="text" placeholder="Nueva falta (ej. No entregar reporte)" className={`${inputCls} flex-1`} value={newPenaltyName} onChange={(e) => setNewPenaltyName(e.target.value)} />
+            <input aria-label="Puntos que resta la nueva falta" type="number" inputMode="numeric" placeholder="Pts" className={`${inputCls} sm:w-28`} value={newPenaltyPoints} onChange={(e) => setNewPenaltyPoints(e.target.value)} />
+            <button type="submit" className={btnPrimary} disabled={busy || !newPenaltyName.trim() || !(Number(newPenaltyPoints) > 0)}>AGREGAR</button>
           </form>
         </section>
 
@@ -602,7 +811,7 @@ export default function Master() {
           </select>
           <p className="mt-4 text-sm font-semibold text-[var(--text)]">¿Qué falta cometió?</p>
           <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            {PENALTIES.map((pen) => (
+            {penalties.map((pen) => (
               <button key={pen.id} type="button" disabled={!penaltyTarget || busy} aria-label={`Restar ${Math.abs(pen.points)} puntos a ${penaltyTarget?.name ?? ""} por ${pen.label}`} onClick={() => doDeduct(pen)} className="flex min-h-12 items-center justify-between gap-2 rounded-md border-2 bg-[var(--surface-alt)] px-3 py-2 text-left disabled:opacity-40" style={{ borderColor: "var(--red)" }}>
                 <span className="text-sm font-semibold text-[var(--text)]">{pen.label}</span>
                 <span className="font-pixel shrink-0 text-[11px]" style={{ color: "var(--red)" }}>−{fmt(Math.abs(pen.points))}</span>
