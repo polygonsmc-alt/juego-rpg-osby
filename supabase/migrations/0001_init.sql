@@ -1,7 +1,7 @@
 -- Juego RPG de Metas — migración 0001
 -- Next.js 14 + Supabase (Postgres + Realtime)
 -- UN SOLO numero de puntos por persona.
--- Proyecto: https://ewwrbsoltopjswobwbqg.supabase.co
+-- Proyecto: https://ewwrbsoltopjswobwbgq.supabase.co
 
 create extension if not exists "pgcrypto";
 

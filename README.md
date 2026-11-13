@@ -46,7 +46,7 @@ actualiza sola en menos de 5 segundos vía Realtime.
 cp .env.example .env.local
 # Llena NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
 # SUPABASE_SERVICE_ROLE_KEY con las llaves de tu proyecto Supabase.
-# Proyecto ya creado: https://ewwrbsoltopjswobwbqg.supabase.co
+# Proyecto ya creado: https://ewwrbsoltopjswobwbgq.supabase.co
 # NUNCA subas .env.local a GitHub.
 
 npm install
