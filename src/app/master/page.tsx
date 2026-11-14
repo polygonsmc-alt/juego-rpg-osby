@@ -380,7 +380,7 @@ export default function Master() {
       const res = await directRedeem(directParticipant.id, directPrize.id, directQtySafe);
       setDirectConfirm(false);
       if (res.ok) setDirectMsg(`Canje registrado: ${directParticipant.name} canjeó ${res.quantity > 1 ? `${res.quantity}x «${directPrize.name}»` : `«${directPrize.name}»`} y se le descontaron ${fmt(res.totalCost)} pts${res.punctualityUsed > 0 ? ` (${fmt(res.punctualityUsed)} de puntualidad)` : directExclusive.exclusive && !directIsPunctuality ? ` (${fmt(res.totalCost)} de su bolsa «${directPrize.name}»)` : ""}. Quedó con ${fmt(res.newPoints)} pts · Puntualidad: ${fmt(res.newPunctualityPoints)} pts. El inventario de ese premio bajó a ${fmt(Math.max(0, directPrize.stock - res.quantity))} disponible${directPrize.stock - res.quantity === 1 ? "" : "s"}${directPrize.stock - res.quantity <= 0 ? " (AGOTADO)" : ""}. Ya se ve en La Carrera como objeto canjeado y en el recuadro de Canjes realizados.`);
-      else setDirectMsg("message" in res && res.message ? res.message : humanError(res.error));
+      else setDirectMsg((res as unknown as { message?: string }).message ? (res as unknown as { message: string }).message : humanError(res.error));
     } catch (e) {
       setDirectConfirm(false);
       setDirectMsg(`No se pudo registrar el canje. Revisa tu conexión e inténtalo de nuevo. (${e instanceof Error ? e.message : String(e)})`);
