@@ -1,8 +1,8 @@
 "use server";
 import { supabaseAdmin, isSupabaseConfigured } from "./supabase";
 import { isMasterAuthenticated } from "./auth";
-import { bestBonus, isPunctualityAction, isPunctualityPenalty, isPunctualityPrize } from "./data";
-import type { Announcement } from "./types";
+import { bestBonus, isPunctualityAction, isPunctualityPenalty, isPunctualityPrize, linkedPrizeForAction, exclusivePrizeInfo, exclusiveShortfallMessage } from "./data";
+import type { Announcement, ActionType, Prize } from "./types";
 
 // Mensaje exacto que pide Osbed cuando no alcanzan los puntos de
 // puntualidad para la cantidad de bonos que quiere canjear. Se devuelve
@@ -20,6 +20,146 @@ async function getBalances(db: ReturnType<typeof supabaseAdmin>, collaboratorId:
   const coll = dbErr(await db.from("collaborators").select("points, punctuality_points").eq("id", collaboratorId).maybeSingle());
   if (!coll) return null;
   return { points: (coll.points as number) ?? 0, punctualityPoints: (coll.punctuality_points as number) ?? 0 };
+}
+
+// --- Bolsas exclusivas genéricas (acción → premio), migración 0004 ---
+// Una bolsa es parte del saldo total ganada con acciones ligadas a un
+// premio: bolsa[prizeId] = puntos. La bolsa del BONO DE PUNTUALIDAD
+// vive en collaborators.punctuality_points (0003); las demás, en
+// collaborator_bags. La suma de las bolsas nunca pasa del total.
+type BagMap = Record<number, number>;
+type Balances = { points: number; punctualityPoints: number };
+async function getBonoPrizeId(db: ReturnType<typeof supabaseAdmin>): Promise<number | null> {
+  const prizes = dbErr(await db.from("prizes").select("id, name").order("id"));
+  const bono = (prizes as { id: number; name: string }[]).find((p) => isPunctualityPrize(p.name as string));
+  return bono ? bono.id : null;
+}
+async function getBags(db: ReturnType<typeof supabaseAdmin>, collaboratorId: number, balances: Balances, bonoPrizeId: number | null): Promise<BagMap> {
+  const bags: BagMap = {};
+  if (bonoPrizeId != null) bags[bonoPrizeId] = balances.punctualityPoints;
+  const res = await db.from("collaborator_bags").select("prize_id, points").eq("collaborator_id", collaboratorId);
+  if (res.error) {
+    const msg = res.error.message || "";
+    if (msg.includes("collaborator_bags") || msg.includes("does not exist") || (res.error as { code?: string }).code === "42P01") {
+      throw new Error("falta_migracion_0004");
+    }
+    throw new Error(msg);
+  }
+  for (const row of (res.data as { prize_id: number; points: number }[]) || []) {
+    if (row.prize_id === bonoPrizeId) continue; // la del bono vive en punctuality_points
+    bags[row.prize_id] = row.points ?? 0;
+  }
+  return bags;
+}
+function sumBags(bags: BagMap): number {
+  return Object.values(bags).reduce((a, b) => a + (b || 0), 0);
+}
+// Guarda las bolsas (excepto la del bono, que va en punctuality_points).
+async function persistBags(db: ReturnType<typeof supabaseAdmin>, collaboratorId: number, bags: BagMap, bonoPrizeId: number | null) {
+  for (const [prizeIdStr, pts] of Object.entries(bags)) {
+    const prizeId = Number(prizeIdStr);
+    if (prizeId === bonoPrizeId) continue;
+    if ((pts || 0) > 0) {
+      dbErr(await db.from("collaborator_bags").upsert({ collaborator_id: collaboratorId, prize_id: prizeId, points: pts }, { onConflict: "collaborator_id,prize_id" }).select("prize_id"));
+    } else {
+      dbErr(await db.from("collaborator_bags").delete().eq("collaborator_id", collaboratorId).eq("prize_id", prizeId).select("prize_id"));
+    }
+  }
+}
+// Para un canje general: primero se gastan los puntos que NO están en
+// ninguna bolsa; solo si no alcanza se toma de las bolsas, de la más
+// grande primero. Devuelve cuánto se tomó de cada bolsa.
+function consumeBagsForGeneral(bags: BagMap, totalPoints: number, cost: number): BagMap {
+  const used: BagMap = {};
+  const nonBag = Math.max(0, totalPoints - sumBags(bags));
+  let need = Math.max(0, cost - nonBag);
+  if (need <= 0) return used;
+  const ordered = Object.entries(bags).sort((a, b) => (b[1] || 0) - (a[1] || 0));
+  for (const [prizeIdStr, pts] of ordered) {
+    if (need <= 0) break;
+    const take = Math.min(pts || 0, need);
+    if (take > 0) { used[Number(prizeIdStr)] = take; need -= take; }
+  }
+  return used;
+}
+// Recorta las bolsas (la más grande primero) hasta que su suma no pase
+// del nuevo total. Devuelve cuánto se recortó de cada bolsa.
+function trimBags(bags: BagMap, newTotal: number): { trimmed: BagMap; after: BagMap } {
+  const after: BagMap = { ...bags };
+  const trimmed: BagMap = {};
+  let excess = sumBags(after) - newTotal;
+  if (excess <= 0) return { trimmed, after };
+  const ordered = Object.entries(after).sort((a, b) => (b[1] || 0) - (a[1] || 0));
+  for (const [prizeIdStr, pts] of ordered) {
+    if (excess <= 0) break;
+    const cut = Math.min(pts || 0, excess);
+    if (cut > 0) { after[Number(prizeIdStr)] = (pts || 0) - cut; trimmed[Number(prizeIdStr)] = cut; excess -= cut; }
+  }
+  return { trimmed, after };
+}
+// Formato guardado en point_events.reason para poder deshacer bolsas:
+// - canje: `bolsas:{"7":500,"12":200}` (lo que se tomó de cada bolsa)
+// - premio de acción: `bolsa:<prizeId>:<delta>` (lo que sumó esa bolsa)
+// - resta que recortó bolsas: se agrega `bolsas:{...}` al motivo.
+function bagsReason(used: BagMap): string | null {
+  const entries = Object.entries(used).filter(([, v]) => (v || 0) > 0);
+  if (!entries.length) return null;
+  return `bolsas:${JSON.stringify(Object.fromEntries(entries))}`;
+}
+function parseBagsReason(reason: string | null | undefined): BagMap {
+  if (!reason) return {};
+  const m = /bolsas:\{[^}]*\}/.exec(reason);
+  if (!m) return {};
+  try {
+    const obj = JSON.parse(m[0].slice("bolsas:".length)) as Record<string, unknown>;
+    const out: BagMap = {};
+    for (const [k, v] of Object.entries(obj)) out[Number(k)] = Number(v) || 0;
+    return out;
+  } catch { return {}; }
+}
+function parseAwardBagReason(reason: string | null | undefined): { prizeId: number; delta: number } | null {
+  if (!reason) return null;
+  const m = /bolsa:(\d+):(\d+)/.exec(reason);
+  if (!m) return null;
+  return { prizeId: Number(m[1]), delta: Number(m[2]) };
+}
+// Cálculo compartido de un canje (directo y aprobar solicitud): valida
+// ANTES de descontar nada y devuelve los saldos nuevos y lo tomado de
+// cada bolsa. Premio exclusivo = alguna acción ligada a él: solo se
+// paga con su bolsa. Premio general = primero puntos sin bolsa.
+function computeRedeem(balances: Balances, bags: BagMap, prize: Prize, qty: number, bonoPrizeId: number | null, actions: ActionType[], prizes: Prize[], totalCostOverride?: number) {
+  // totalCostOverride: una solicitud pendiente guarda su propio costo
+  // total (el precio de cuando se pidió); si se pasa, se descuenta ese.
+  const totalCost = totalCostOverride ?? (prize.cost as number) * qty;
+  if ((prize.stock as number) < qty) {
+    return (prize.stock as number) <= 0
+      ? { ok: false as const, error: "out_of_stock" }
+      : { ok: false as const, error: "stock_insuficiente", message: `Solo quedan ${prize.stock} unidades de «${prize.name}», no se pueden canjear ${qty}.` };
+  }
+  const { exclusive, actionLabels } = exclusivePrizeInfo(prize, actions, prizes);
+  const bagPoints = bags[prize.id] ?? 0;
+  if (exclusive && bagPoints < totalCost) {
+    if (isPunctualityPrize(prize.name as string)) {
+      return { ok: false as const, error: "punctuality_insufficient", message: punctualityShortfallMessage(qty, balances.punctualityPoints) };
+    }
+    return { ok: false as const, error: "exclusive_insufficient", message: exclusiveShortfallMessage(qty, prize.name as string, bagPoints, actionLabels) };
+  }
+  if (balances.points < totalCost) {
+    return { ok: false as const, error: "insufficient_points", message: `No le alcanzan los puntos: tiene ${balances.points} pts y ${qty} × «${prize.name}» cuestan ${totalCost} pts.` };
+  }
+  const newPoints = balances.points - totalCost;
+  let bagUsed: BagMap = {};
+  let bagAfter: BagMap = { ...bags };
+  if (exclusive) {
+    bagUsed = { [prize.id]: totalCost };
+    bagAfter[prize.id] = bagPoints - totalCost;
+  } else {
+    bagUsed = consumeBagsForGeneral(bags, balances.points, totalCost);
+    for (const [k, v] of Object.entries(bagUsed)) bagAfter[Number(k)] = (bags[Number(k)] || 0) - v;
+  }
+  const newPunctualityPoints = bonoPrizeId != null ? Math.max(0, Math.min(newPoints, bagAfter[bonoPrizeId] ?? balances.punctualityPoints)) : balances.punctualityPoints;
+  const punctualityUsed = Math.max(0, balances.punctualityPoints - newPunctualityPoints);
+  return { ok: true as const, totalCost, newPoints, newPunctualityPoints, bagUsed, bagAfter, punctualityUsed, exclusive };
 }
 
 // Si Supabase no está configurado (sin env vars en Vercel), el cliente
@@ -55,21 +195,27 @@ function dbErr(res: { data: any; error: { message: string } | null }): any {
 }
 
 /** Reglas de negocio (lado servidor, con service role).
- *  - Un solo numero de puntos (saldo total) + sub-saldo de puntualidad.
- *  - Solo las acciones de puntualidad (check-in puntual, semana sin
- *    faltas, mes perfecto) suman lo mismo al total y a punctuality_points.
- *    Ventas, leads y entregas suman solo al total.
+ *  - Un solo numero de puntos (saldo total) + bolsas exclusivas.
+ *  - Bolsa = parte del total ganada con acciones ligadas a un premio
+ *    (action_types.linked_prize_id). La puntualidad es la primera bolsa:
+ *    check-in puntual, semana sin faltas y mes perfecto suman lo mismo
+ *    al total y a punctuality_points; ventas, leads y entregas suman
+ *    solo al total, salvo que el Master las ligue a un premio.
  *  - Retardo / Falta injustificada restan también de punctuality_points.
- *  - Saldo nunca < 0; punctuality_points nunca < 0 ni mayor que el total.
- *  - Canje descuenta puntos y stock (por cantidad). El BONO DE
- *    PUNTUALIDAD solo se canjea con puntos de puntualidad.
+ *  - Saldo nunca < 0; ninguna bolsa baja de 0 ni su suma pasa del total.
+ *  - Canje descuenta puntos y stock (por cantidad). Un premio exclusivo
+ *    (alguna acción ligada a él, como el BONO DE PUNTUALIDAD) solo se
+ *    canjea con su bolsa. Si no se canjea, esos puntos se quedan y suman
+ *    para los premios generales.
  *  - Canje de premio general: se descuenta primero de los puntos que NO
- *    son de puntualidad y solo si no alcanza, de puntualidad.
+ *    están en ninguna bolsa y solo si no alcanza, de las bolsas (la más
+ *    grande primero).
  *  - Deshacer: revierte saldo y, si era premio, devuelve el stock por
  *    cantidad. No borra historial: marca reversed=true y agrega renglón
- *    'reversal'. El deshacer también revierte el sub-saldo de puntualidad
- *    que ese movimiento había movido (guardado en point_events.reason
- *    como `punctualidad:<n>` en los canjes).
+ *    'reversal'. El deshacer también revierte las bolsas que ese
+ *    movimiento había movido (guardado en point_events.reason como
+ *    `bolsas:{...}` en los canjes y `bolsa:<prizeId>:<n>` en los premios;
+ *    en canjes viejos, `punctualidad:<n>`).
  *  - Bono: si Merlín y Corvo coinciden, aplica el más fuerte, no se suman.
  */
 async function getBonuses() {
@@ -118,12 +264,30 @@ export async function awardPoints(collaboratorId: number, actionId: number, labe
     // Acción de puntualidad: el mismo monto suma también al sub-saldo.
     const punctualityDelta = isPunctualityAction(actionId || null, label) ? total : 0;
     const newPunctualityPoints = Math.max(0, Math.min(newPoints, balances.punctualityPoints + punctualityDelta));
+    // Bolsa exclusiva: si la acción está ligada a un premio (o es de
+    // puntualidad), el mismo monto suma a la bolsa de ese premio.
+    let linkedPrizeId: number | null = null;
+    let bagAfter = 0;
+    if (actionId) {
+      const prizes = dbErr(await db.from("prizes").select("*").order("id")) as Prize[];
+      const actionRow = dbErr(await db.from("action_types").select("*").eq("id", actionId).maybeSingle()) as ActionType | null;
+      const bonoPrizeId = await getBonoPrizeId(db);
+      linkedPrizeId = linkedPrizeForAction(actionRow ?? { id: actionId, label, points: basePoints, linked_prize_id: null }, prizes);
+      if (linkedPrizeId != null) {
+        const bags = await getBags(db, collaboratorId, balances, bonoPrizeId);
+        const after: BagMap = { ...bags, [linkedPrizeId]: (bags[linkedPrizeId] ?? 0) + total };
+        if (linkedPrizeId === bonoPrizeId) after[linkedPrizeId] = newPunctualityPoints;
+        await persistBags(db, collaboratorId, after, bonoPrizeId);
+        bagAfter = after[linkedPrizeId];
+      }
+    }
     dbErr(await db.from("collaborators").update({ points: newPoints, punctuality_points: newPunctualityPoints }).eq("id", collaboratorId).select("id"));
     dbErr(await db.from("point_events").insert({
       collaborator_id: collaboratorId, kind: "award", label,
       points: total, bonus_from: bonus.from,
+      reason: linkedPrizeId != null ? `bolsa:${linkedPrizeId}:${total}` : null,
     }).select("id"));
-    return { ok: true as const, points: total, bonus_from: bonus.from, newPoints, newPunctualityPoints, punctualityDelta };
+    return { ok: true as const, points: total, bonus_from: bonus.from, newPoints, newPunctualityPoints, punctualityDelta, linkedPrizeId, bagAfter };
   } catch (e) {
     return { ok: false as const, error: errText(e) };
   }
@@ -145,11 +309,33 @@ export async function deductPoints(collaboratorId: number, label: string, points
     const newPunctualityPoints = isPunctualityPenalty(label)
       ? Math.max(0, Math.min(newPoints, balances.punctualityPoints - Math.abs(points)))
       : Math.min(balances.punctualityPoints, newPoints);
-    dbErr(await db.from("collaborators").update({ points: newPoints, punctuality_points: newPunctualityPoints }).eq("id", collaboratorId).select("id"));
+    // Las demás bolsas también se recortan si su suma pasa del nuevo
+    // total (la más grande primero); lo recortado se guarda en el motivo
+    // para que Deshacer lo pueda devolver.
+    const bonoPrizeId = await getBonoPrizeId(db);
+    const bags = await getBags(db, collaboratorId, balances, bonoPrizeId);
+    const bagsWithPunct: BagMap = { ...bags, ...(bonoPrizeId != null ? { [bonoPrizeId]: newPunctualityPoints } : {}) };
+    const { trimmed, after } = trimBags(bagsWithPunct, newPoints);
+    // Si el sub-saldo bajó más de lo que la falta quitó por el tope
+    // (nunca pasa del total), esa parte extra también se guarda como
+    // recorte para que Deshacer la devuelva. En una falta de puntualidad
+    // el deshacer ya devuelve lo que la falta quitó (|puntos|), así que
+    // aquí solo se agrega lo que bajó por encima de eso.
+    if (bonoPrizeId != null) {
+      const punctualityConsumed = balances.punctualityPoints - newPunctualityPoints;
+      const alreadyRestored = isPunctualityPenalty(label) ? Math.abs(points) : 0;
+      const extra = punctualityConsumed - alreadyRestored;
+      if (extra > 0) trimmed[bonoPrizeId] = (trimmed[bonoPrizeId] ?? 0) + extra;
+    }
+    const finalPunctuality = bonoPrizeId != null ? (after[bonoPrizeId] ?? newPunctualityPoints) : newPunctualityPoints;
+    await persistBags(db, collaboratorId, after, bonoPrizeId);
+    const trimmedReason = bagsReason(trimmed);
+    dbErr(await db.from("collaborators").update({ points: newPoints, punctuality_points: finalPunctuality }).eq("id", collaboratorId).select("id"));
     dbErr(await db.from("point_events").insert({
-      collaborator_id: collaboratorId, kind: "penalty", label, points, reason: reason || null,
+      collaborator_id: collaboratorId, kind: "penalty", label, points,
+      reason: trimmedReason ? (reason ? `${reason} · ${trimmedReason}` : trimmedReason) : (reason || null),
     }).select("id"));
-    return { ok: true as const, newPoints, newPunctualityPoints };
+    return { ok: true as const, newPoints, newPunctualityPoints: finalPunctuality };
   } catch (e) {
     return { ok: false as const, error: errText(e) };
   }
@@ -165,33 +351,19 @@ export async function directRedeem(collaboratorId: number, prizeId: number, quan
     const db = supabaseAdmin();
     const prize = dbErr(await db.from("prizes").select("*").eq("id", prizeId).maybeSingle());
     if (!prize) return { ok: false as const, error: "premio no encontrado" };
-    const totalCost = (prize.cost as number) * qty;
-    // Validaciones ANTES de descontar nada: stock, puntos totales y,
-    // si es BONO DE PUNTUALIDAD, puntos de puntualidad.
-    if ((prize.stock as number) < qty) {
-      return (prize.stock as number) <= 0
-        ? { ok: false as const, error: "out_of_stock" }
-        : { ok: false as const, error: "stock_insuficiente", message: `Solo quedan ${prize.stock} unidades de «${prize.name}», no se pueden canjear ${qty}.` };
-    }
     const balances = await getBalances(db, collaboratorId);
     if (!balances) return { ok: false as const, error: "colaborador no encontrado" };
-    const isPunctuality = isPunctualityPrize(prize.name as string);
-    if (isPunctuality && balances.punctualityPoints < totalCost) {
-      return { ok: false as const, error: "punctuality_insufficient", message: punctualityShortfallMessage(qty, balances.punctualityPoints) };
-    }
-    if (balances.points < totalCost) {
-      return { ok: false as const, error: "insufficient_points", message: `No le alcanzan los puntos: tiene ${balances.points} pts y ${qty} × «${prize.name}» cuestan ${totalCost} pts.` };
-    }
-    const newPoints = balances.points - totalCost;
-    // Bono de puntualidad: se descuenta también del sub-saldo.
-    // Premio general: primero se gastan los puntos que no son de
-    // puntualidad; solo si no alcanza se toma de puntualidad
-    // (= punctuality_points queda en min(punct, nuevo total)).
-    const punctualityUsed = isPunctuality
-      ? totalCost
-      : Math.max(0, totalCost - (balances.points - balances.punctualityPoints));
-    const newPunctualityPoints = Math.max(0, Math.min(newPoints, balances.punctualityPoints - punctualityUsed));
+    const bonoPrizeId = await getBonoPrizeId(db);
+    const bags = await getBags(db, collaboratorId, balances, bonoPrizeId);
+    const actions = dbErr(await db.from("action_types").select("*").order("id")) as ActionType[];
+    const prizes = dbErr(await db.from("prizes").select("*").order("id")) as Prize[];
+    // Validación ANTES de descontar nada (computeRedeem): stock, puntos
+    // totales y, si el premio es exclusivo, su bolsa.
+    const calc = computeRedeem(balances, bags, prize, qty, bonoPrizeId, actions, prizes);
+    if (!calc.ok) return calc;
+    const { totalCost, newPoints, newPunctualityPoints, bagUsed, bagAfter, punctualityUsed } = calc;
     dbErr(await db.from("collaborators").update({ points: newPoints, punctuality_points: newPunctualityPoints }).eq("id", collaboratorId).select("id"));
+    await persistBags(db, collaboratorId, bagAfter, bonoPrizeId);
     dbErr(await db.from("prizes").update({ stock: (prize.stock as number) - qty }).eq("id", prizeId).select("id"));
     const red = dbErr(await db.from("redemptions").insert({
       collaborator_id: collaboratorId, prize_id: prizeId, prize_name: prize.name,
@@ -200,9 +372,9 @@ export async function directRedeem(collaboratorId: number, prizeId: number, quan
     dbErr(await db.from("point_events").insert({
       collaborator_id: collaboratorId, kind: "redeem",
       label: redeemLabel(prize.name as string, qty), points: -totalCost,
-      // Para que Deshacer pueda devolver al sub-saldo exactamente lo que
+      // Para que Deshacer pueda devolver a cada bolsa exactamente lo que
       // este canje le quitó (en un canje general puede ser 0).
-      reason: punctualityUsed > 0 ? `punctualidad:${punctualityUsed}` : null,
+      reason: bagsReason(bagUsed) ?? (punctualityUsed > 0 ? `punctualidad:${punctualityUsed}` : null),
     }).select("id"));
     return { ok: true as const, redemption: red, newPoints, newPunctualityPoints, quantity: qty, totalCost, punctualityUsed };
   } catch (e) {
@@ -231,32 +403,23 @@ export async function resolveRedemption(redemptionId: number, approve: boolean) 
     // si la fila ya trae cantidad, se respeta.
     const qty = Math.max(1, Math.trunc(Number((red as { quantity?: number }).quantity ?? 1)));
     const cost = red.cost as number; // costo total guardado en la solicitud
-    if ((prize.stock as number) < qty) {
-      return (prize.stock as number) <= 0
-        ? { ok: false as const, error: "out_of_stock" }
-        : { ok: false as const, error: "stock_insuficiente", message: `Solo quedan ${prize.stock} unidades de «${prize.name}», no se pueden canjear ${qty}.` };
-    }
     const balances = await getBalances(db, red.collaborator_id as number);
     if (!balances) return { ok: false as const, error: "colaborador no encontrado" };
-    const isPunctuality = isPunctualityPrize(prize.name as string);
-    if (isPunctuality && balances.punctualityPoints < cost) {
-      return { ok: false as const, error: "punctuality_insufficient", message: punctualityShortfallMessage(qty, balances.punctualityPoints) };
-    }
-    if (balances.points < cost) {
-      return { ok: false as const, error: "insufficient_points", message: `No le alcanzan los puntos: tiene ${balances.points} pts y «${prize.name}» cuesta ${cost} pts.` };
-    }
-    const newPoints = balances.points - cost;
-    const punctualityUsed = isPunctuality
-      ? cost
-      : Math.max(0, cost - (balances.points - balances.punctualityPoints));
-    const newPunctualityPoints = Math.max(0, Math.min(newPoints, balances.punctualityPoints - punctualityUsed));
+    const bonoPrizeId = await getBonoPrizeId(db);
+    const bags = await getBags(db, red.collaborator_id as number, balances, bonoPrizeId);
+    const actions = dbErr(await db.from("action_types").select("*").order("id")) as ActionType[];
+    const prizes = dbErr(await db.from("prizes").select("*").order("id")) as Prize[];
+    const calc = computeRedeem(balances, bags, prize, qty, bonoPrizeId, actions, prizes, cost);
+    if (!calc.ok) return calc;
+    const { totalCost, newPoints, newPunctualityPoints, bagUsed, bagAfter, punctualityUsed } = calc;
     dbErr(await db.from("collaborators").update({ points: newPoints, punctuality_points: newPunctualityPoints }).eq("id", red.collaborator_id).select("id"));
+    await persistBags(db, red.collaborator_id as number, bagAfter, bonoPrizeId);
     dbErr(await db.from("prizes").update({ stock: (prize.stock as number) - qty }).eq("id", red.prize_id).select("id"));
     dbErr(await db.from("redemptions").update({ status: "approved", resolved_at: new Date().toISOString() }).eq("id", redemptionId).select("id"));
     dbErr(await db.from("point_events").insert({
       collaborator_id: red.collaborator_id, kind: "redeem",
-      label: redeemLabel(red.prize_name as string, qty), points: -cost,
-      reason: punctualityUsed > 0 ? `punctualidad:${punctualityUsed}` : null,
+      label: redeemLabel(red.prize_name as string, qty), points: -totalCost,
+      reason: bagsReason(bagUsed) ?? (punctualityUsed > 0 ? `punctualidad:${punctualityUsed}` : null),
     }).select("id"));
     return { ok: true as const, approved: true, newPoints, newPunctualityPoints };
   } catch (e) {
@@ -280,25 +443,51 @@ export async function undoEvent(eventId: number) {
     const punctualityPoints = (coll.punctuality_points as number) ?? 0;
     // Revertir: restar lo que se sumó, o devolver lo que se quitó.
     const newPoints = Math.max(0, points - (ev.points as number));
-    // El sub-saldo se revierte solo en lo que ese movimiento movió:
-    // - premio de puntualidad: se devolvió al sumar (o se quitó al restar);
-    // - falta de puntualidad: se devuelve lo que la falta quitó;
-    // - canje: se devuelve lo guardado en reason (`punctualidad:<n>`);
-    //   en un canje general puede ser 0 (se gastaron puntos no puntuales).
-    // - cualquier otro movimiento: el sub-saldo solo se recorta si el
-    //   nuevo total queda por debajo de él.
-    let newPunctualityPoints: number;
-    if (ev.kind === "award" && isPunctualityAction(null, ev.label as string)) {
-      newPunctualityPoints = Math.max(0, Math.min(newPoints, punctualityPoints - (ev.points as number)));
-    } else if (ev.kind === "penalty" && isPunctualityPenalty(ev.label as string)) {
-      newPunctualityPoints = Math.min(newPoints, punctualityPoints + Math.abs(ev.points as number));
+    // Las bolsas se revierten solo en lo que ese movimiento movió:
+    // - premio (award): se quita de la bolsa lo que ese premio sumó
+    //   (guardado en reason como `bolsa:<prizeId>:<delta>`, o por la
+    //   acción ligada a esa etiqueta si el evento es anterior al ligado);
+    // - falta (penalty): se devuelve lo recortado de cada bolsa
+    //   (guardado en reason como `bolsas:{...}`) y, si es de puntualidad,
+    //   lo que la falta quitó del sub-saldo;
+    // - canje (redeem): se devuelve lo guardado en reason
+    //   (`bolsas:{...}`; en eventos viejos, `punctualidad:<n>`).
+    // La suma de las bolsas nunca pasa del nuevo total.
+    const balances = { points, punctualityPoints };
+    const bonoPrizeId = await getBonoPrizeId(db);
+    const bags = await getBags(db, ev.collaborator_id as number, balances, bonoPrizeId);
+    const actions = dbErr(await db.from("action_types").select("*").order("id")) as ActionType[];
+    const prizes = dbErr(await db.from("prizes").select("*").order("id")) as Prize[];
+    const reason = String((ev as { reason?: string | null }).reason ?? "");
+    let bagAfter: BagMap = { ...bags };
+    if (ev.kind === "award") {
+      const parsed = parseAwardBagReason(reason);
+      let prizeId: number | null = parsed ? parsed.prizeId : null;
+      const delta = parsed ? parsed.delta : (ev.points as number);
+      if (prizeId == null) {
+        const act = actions.find((a) => a.label === (ev.label as string));
+        prizeId = act ? linkedPrizeForAction(act, prizes) : (isPunctualityAction(null, ev.label as string) ? bonoPrizeId : null);
+      }
+      if (prizeId != null) bagAfter[prizeId] = Math.max(0, (bags[prizeId] ?? 0) - delta);
+    } else if (ev.kind === "penalty") {
+      const restored = parseBagsReason(reason);
+      for (const [k, v] of Object.entries(restored)) bagAfter[Number(k)] = (bags[Number(k)] ?? 0) + v;
+      if (isPunctualityPenalty(ev.label as string) && bonoPrizeId != null) {
+        bagAfter[bonoPrizeId] = (bagAfter[bonoPrizeId] ?? punctualityPoints) + Math.abs(ev.points as number);
+      }
     } else if (ev.kind === "redeem") {
-      const m = /^punctualidad:(\d+)$/.exec(String((ev as { reason?: string | null }).reason ?? ""));
-      const used = m ? Number(m[1]) : 0;
-      newPunctualityPoints = Math.min(newPoints, punctualityPoints + used);
-    } else {
-      newPunctualityPoints = Math.min(punctualityPoints, newPoints);
+      const restored = parseBagsReason(reason);
+      if (Object.keys(restored).length) {
+        for (const [k, v] of Object.entries(restored)) bagAfter[Number(k)] = (bags[Number(k)] ?? 0) + v;
+      } else {
+        const m = /^punctualidad:(\d+)$/.exec(reason);
+        if (m && bonoPrizeId != null) bagAfter[bonoPrizeId] = (bags[bonoPrizeId] ?? punctualityPoints) + Number(m[1]);
+      }
     }
+    const trimmedUndo = trimBags(bagAfter, newPoints);
+    bagAfter = trimmedUndo.after;
+    const newPunctualityPoints = bonoPrizeId != null ? (bagAfter[bonoPrizeId] ?? Math.min(punctualityPoints, newPoints)) : Math.min(punctualityPoints, newPoints);
+    await persistBags(db, ev.collaborator_id as number, bagAfter, bonoPrizeId);
     dbErr(await db.from("collaborators").update({ points: newPoints, punctuality_points: newPunctualityPoints }).eq("id", ev.collaborator_id).select("id"));
     dbErr(await db.from("point_events").update({ reversed: true }).eq("id", eventId).select("id"));
     dbErr(await db.from("point_events").insert({
@@ -334,7 +523,7 @@ function validAction(name: string, points: number): string | null {
   if (!Number.isInteger(points) || points <= 0) return "Los puntos deben ser un número entero mayor que 0.";
   return null;
 }
-export async function addActionType(name: string, points: number) {
+export async function addActionType(name: string, points: number, linkedPrizeId?: number | null) {
   const auth = await requireMasterAuth();
   if (auth) return auth;
   if (!isSupabaseConfigured) return notConfigured();
@@ -344,11 +533,11 @@ export async function addActionType(name: string, points: number) {
     const db = supabaseAdmin();
     const { data: last } = await db.from("action_types").select("id").order("id", { ascending: false }).limit(1);
     const nextId = ((last?.[0]?.id as number | undefined) ?? 0) + 1;
-    dbErr(await db.from("action_types").insert({ id: nextId, label: name.trim(), points: Math.trunc(points) }).select("id"));
+    dbErr(await db.from("action_types").insert({ id: nextId, label: name.trim(), points: Math.trunc(points), linked_prize_id: linkedPrizeId ?? null }).select("id"));
     return { ok: true as const, id: nextId };
   } catch (e) { return { ok: false as const, error: errText(e) }; }
 }
-export async function updateActionType(id: number, name: string, points: number) {
+export async function updateActionType(id: number, name: string, points: number, linkedPrizeId?: number | null) {
   const auth = await requireMasterAuth();
   if (auth) return auth;
   if (!isSupabaseConfigured) return notConfigured();
@@ -356,7 +545,11 @@ export async function updateActionType(id: number, name: string, points: number)
   if (bad) return { ok: false as const, error: bad };
   try {
     const db = supabaseAdmin();
-    dbErr(await db.from("action_types").update({ label: name.trim(), points: Math.trunc(points) }).eq("id", id).select("id"));
+    // linkedPrizeId undefined = no se toca el ligado (llamadas viejas);
+    // null = quitar el ligado; número = ligar a ese premio.
+    const fields: { label: string; points: number; linked_prize_id?: number | null } = { label: name.trim(), points: Math.trunc(points) };
+    if (linkedPrizeId !== undefined) fields.linked_prize_id = linkedPrizeId;
+    dbErr(await db.from("action_types").update(fields).eq("id", id).select("id"));
     return { ok: true as const };
   } catch (e) { return { ok: false as const, error: errText(e) }; }
 }

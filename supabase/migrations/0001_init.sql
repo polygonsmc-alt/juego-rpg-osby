@@ -19,10 +19,22 @@ create table if not exists collaborators (
 );
 
 -- Catálogo de acciones (12) — se siembra desde la app si está vacío
+-- linked_prize_id (migración 0004): premio ligado opcional; los puntos
+-- de esa acción suman también a la bolsa exclusiva de ese premio.
 create table if not exists action_types (
   id bigint primary key,
   label text not null,
-  points int not null
+  points int not null,
+  linked_prize_id bigint -- FK a prizes, se agrega abajo (prizes aún no existe aquí)
+);
+
+-- Bolsas exclusivas por colaborador y premio (migración 0004). La del
+-- BONO DE PUNTUALIDAD vive en collaborators.punctuality_points.
+create table if not exists collaborator_bags (
+  collaborator_id bigint not null references collaborators(id) on delete cascade,
+  prize_id bigint not null, -- FK a prizes, se agrega abajo (prizes aún no existe aquí)
+  points int not null default 0 check (points >= 0),
+  primary key (collaborator_id, prize_id)
 );
 
 create table if not exists penalty_types (
@@ -52,6 +64,14 @@ create table if not exists prizes (
   cost int not null check (cost > 0),
   stock int not null default 0 check (stock >= 0)
 );
+
+-- FKs a prizes (no se podían poner inline arriba porque prizes se crea aquí).
+do $$ begin
+  alter table action_types add constraint action_types_linked_prize_fk foreign key (linked_prize_id) references prizes(id) on delete set null;
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter table collaborator_bags add constraint collaborator_bags_prize_fk foreign key (prize_id) references prizes(id) on delete cascade;
+exception when duplicate_object then null; end $$;
 
 -- Canjes. Solo el Master aprueba / hace canje directo.
 -- cost = costo TOTAL (cantidad x costo unitario); quantity = unidades.
@@ -101,6 +121,7 @@ create table if not exists settings (
 -- RLS: para este juego interno se habilita con políticas permisivas de lectura
 -- y escritura vía anon (el Master es de uso interno; endurecer con auth si se expone).
 alter table collaborators enable row level security;
+alter table collaborator_bags enable row level security;
 alter table action_types enable row level security;
 alter table penalty_types enable row level security;
 alter table point_events enable row level security;
@@ -113,6 +134,8 @@ alter table settings enable row level security;
 do $$ begin
   create policy "public read" on collaborators for select using (true);
   create policy "public write" on collaborators for all using (true);
+  create policy "public read" on collaborator_bags for select using (true);
+  create policy "public write" on collaborator_bags for all using (true);
   create policy "public read" on action_types for select using (true);
   create policy "public write" on action_types for all using (true);
   create policy "public read" on penalty_types for select using (true);
@@ -133,6 +156,7 @@ exception when duplicate_object then null; end $$;
 
 -- Realtime: Master -> La Carrera en <5s
 alter publication supabase_realtime add table collaborators;
+alter publication supabase_realtime add table collaborator_bags;
 alter publication supabase_realtime add table point_events;
 alter publication supabase_realtime add table prizes;
 alter publication supabase_realtime add table redemptions;
@@ -173,6 +197,10 @@ insert into prizes (id, name, cost, stock) values
  (6,'CONSOLA SONY PS5 (STANDARD)',100000,1),
  (7,'BONO DE PUNTUALIDAD',500,100)
 on conflict (id) do nothing;
+
+-- Puntualidad ligada a su bono: acciones 3 y 12 suman a la bolsa del
+-- BONO DE PUNTUALIDAD (id 7).
+update action_types set linked_prize_id = 7 where id in (3, 12);
 
 insert into settings (id, company_name, logo_url, theme, season) values
  (1,'SCRIPT TECNOLOGIAS DE LA INFORMACION',null,'bosque','navidad')

@@ -23,18 +23,18 @@ export function nextLevel(points: number): { name: string; min: number } | null 
 }
 
 export const ACTIONS: ActionType[] = [
-  { id: 1, label: "Venta concretada", points: 100 },
-  { id: 2, label: "Entrega de proyecto a tiempo", points: 50 },
-  { id: 3, label: "Semana sin faltas ni retardos", points: 50 },
-  { id: 4, label: "Cliente referido que sí compra", points: 40 },
-  { id: 5, label: "Idea de mejora que se implementa", points: 40 },
-  { id: 6, label: "Venta de producto destacado / upsell", points: 30 },
-  { id: 7, label: "Reseña de 5 estrellas conseguida", points: 30 },
-  { id: 8, label: "Lead nuevo", points: 25 },
-  { id: 9, label: "Entrega sin correcciones", points: 25 },
-  { id: 10, label: "Capacitación o curso completado", points: 20 },
-  { id: 11, label: "Ayuda a un compañero (validada)", points: 15 },
-  { id: 12, label: "Check-in puntual", points: 10 },
+  { id: 1, label: "Venta concretada", points: 100, linked_prize_id: null },
+  { id: 2, label: "Entrega de proyecto a tiempo", points: 50, linked_prize_id: null },
+  { id: 3, label: "Semana sin faltas ni retardos", points: 50, linked_prize_id: 7 },
+  { id: 4, label: "Cliente referido que sí compra", points: 40, linked_prize_id: null },
+  { id: 5, label: "Idea de mejora que se implementa", points: 40, linked_prize_id: null },
+  { id: 6, label: "Venta de producto destacado / upsell", points: 30, linked_prize_id: null },
+  { id: 7, label: "Reseña de 5 estrellas conseguida", points: 30, linked_prize_id: null },
+  { id: 8, label: "Lead nuevo", points: 25, linked_prize_id: null },
+  { id: 9, label: "Entrega sin correcciones", points: 25, linked_prize_id: null },
+  { id: 10, label: "Capacitación o curso completado", points: 20, linked_prize_id: null },
+  { id: 11, label: "Ayuda a un compañero (validada)", points: 15, linked_prize_id: null },
+  { id: 12, label: "Check-in puntual", points: 10, linked_prize_id: 7 },
 ];
 
 export const PENALTIES: PenaltyType[] = [
@@ -85,6 +85,44 @@ export function isPunctualityPrize(prizeName: string): boolean {
 // Cuántos bonos de puntualidad alcanza a canjear con su sub-saldo.
 export function punctualityBonusesAvailable(punctualityPoints: number, cost: number = PUNCTUALITY_PRIZE_COST): number {
   return Math.max(0, Math.floor((punctualityPoints || 0) / cost));
+}
+
+// --- Bolsas exclusivas genéricas (acción → premio) ---
+// Igual que la puntualidad, pero para cualquier acción y premio: el
+// Master liga una acción a un premio en ACCIONES Y PUNTOS y los puntos
+// de esa acción suman también a la bolsa de ese premio (parte del
+// total). Solo con esa bolsa se canjea ese premio; si no se canjea, los
+// puntos se quedan y suman para los premios generales.
+// La puntualidad es la primera bolsa: acciones 3 y 12 ligadas al BONO
+// DE PUNTUALIDAD (id 7 en el seed). Su saldo vive en
+// collaborators.punctuality_points, no en collaborator_bags.
+// Premio ligado de una acción: el guardado en la base (linked_prize_id)
+// y, por compatibilidad con lo anterior, el bono de puntualidad para
+// las acciones de puntualidad aunque aún no tengan el ligado guardado.
+export function linkedPrizeForAction(action: ActionType | null | undefined, prizes: Prize[]): number | null {
+  if (!action) return null;
+  if (action.linked_prize_id != null) return action.linked_prize_id;
+  if (isPunctualityAction(action.id, action.label)) {
+    const bono = prizes.find((p) => isPunctualityPrize(p.name));
+    return bono ? bono.id : null;
+  }
+  return null;
+}
+// ¿Este premio es exclusivo? Lo es si alguna acción está ligada a él
+// (o si es el BONO DE PUNTUALIDAD, ligado a las acciones de puntualidad).
+export function exclusivePrizeInfo(prize: Prize, actions: ActionType[], prizes: Prize[]): { exclusive: boolean; actionLabels: string[] } {
+  const labels = actions.filter((a) => linkedPrizeForAction(a, prizes) === prize.id).map((a) => a.label);
+  return { exclusive: labels.length > 0, actionLabels: labels };
+}
+// Cuántas unidades de un premio alcanzan con una bolsa.
+export function unitsAvailable(bagPoints: number, cost: number): number {
+  return Math.max(0, Math.floor((bagPoints || 0) / Math.max(1, cost)));
+}
+// Mensaje genérico cuando no alcanza la bolsa para la cantidad pedida
+// (mismo formato que el de puntualidad, que se mantiene exacto aparte).
+export function exclusiveShortfallMessage(quantity: number, prizeName: string, bagPoints: number, actionLabels: string[]): string {
+  const con = actionLabels.length ? ` de ${actionLabels.join(" / ")}` : "";
+  return `NO CUMPLES CON LOS REQUERIMIENTOS PARA CANJEAR ${quantity} ${prizeName}, solo cuentas con ${bagPoints} puntos${con} que sí puedes canjear por ${prizeName}.`;
 }
 
 export const PRIZES_SEED: Prize[] = [

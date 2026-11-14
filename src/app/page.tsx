@@ -15,6 +15,7 @@ const SEED_STATE: GameState = {
   action_types: ACTIONS,
   penalty_types: PENALTIES,
   prizes: PRIZES_SEED,
+  bags: [],
   events: [],
   redemptions: [],
   announcements: MERLIN_SEED,
@@ -58,6 +59,7 @@ export default function LaCarrera() {
       redemptions: r.data || prev.redemptions,
       announcements: a.data || prev.announcements,
       crow_announcements: ca.data || prev.crow_announcements,
+      bags: prev.bags, // La Carrera es solo visual: no muestra bolsas
       settings: (s.data as GameState["settings"]) || prev.settings,
     }));
     setLive(true);

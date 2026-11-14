@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { ACTIONS, PENALTIES, COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, THEMES, AVATAR_NAMES, levelFor, isPunctualityAction, isPunctualityPenalty, isPunctualityPrize, punctualityBonusesAvailable, PUNCTUALITY_PRIZE_COST } from "@/lib/data";
-import type { GameState, Collaborator, PointEvent, ActionType, PenaltyType } from "@/lib/types";
+import { ACTIONS, PENALTIES, COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, THEMES, AVATAR_NAMES, levelFor, isPunctualityAction, isPunctualityPenalty, isPunctualityPrize, punctualityBonusesAvailable, PUNCTUALITY_PRIZE_COST, linkedPrizeForAction, exclusivePrizeInfo, unitsAvailable } from "@/lib/data";
+import type { GameState, Collaborator, PointEvent, ActionType, PenaltyType, CollaboratorBag } from "@/lib/types";
 import { awardPoints, deductPoints, directRedeem, undoEvent, testConnection, resolveRedemption, addPrize, updatePrize, removePrize, publishAnnouncement, toggleAnnouncementAction, deleteAnnouncementAction, saveCompanyAction, saveAppearanceAction, addActionType, updateActionType, removeActionType, addCollaborator, updateCollaborator, removeCollaborator, addPenaltyType, updatePenaltyType, removePenaltyType, setCompanyLogo, removeCompanyLogo } from "@/lib/actions";
 import { logoutPin } from "@/lib/auth";
 import PixelAvatar from "@/components/PixelAvatar";
@@ -14,7 +14,7 @@ import Merlin from "@/components/Merlin";
 import Corvo from "@/components/Corvo";
 
 const SEED: GameState = {
-  collaborators: COLLABORATORS_SEED, action_types: ACTIONS, penalty_types: PENALTIES, prizes: PRIZES_SEED, events: [], redemptions: [],
+  collaborators: COLLABORATORS_SEED, action_types: ACTIONS, penalty_types: PENALTIES, prizes: PRIZES_SEED, bags: [], events: [], redemptions: [],
   announcements: MERLIN_SEED, crow_announcements: CORVO_SEED, settings: SETTINGS_SEED,
 };
 
@@ -131,8 +131,10 @@ export default function Master() {
   const [editingAction, setEditingAction] = useState<number | null>(null);
   const [editActionName, setEditActionName] = useState("");
   const [editActionPoints, setEditActionPoints] = useState("");
+  const [editActionLinked, setEditActionLinked] = useState(""); // id del premio ligado, "" = sin ligar
   const [newActionName, setNewActionName] = useState("");
   const [newActionPoints, setNewActionPoints] = useState("");
+  const [newActionLinked, setNewActionLinked] = useState(""); // id del premio ligado, "" = sin ligar
   // Agregar / editar colaborador (COLABORADORES)
   const [newCollabName, setNewCollabName] = useState("");
   const [newCollabSprite, setNewCollabSprite] = useState(0);
@@ -171,6 +173,10 @@ export default function Master() {
         return "No le alcanzan los puntos para ese premio.";
       case "punctuality_insufficient":
         return "No le alcanzan los puntos de puntualidad para esos bonos.";
+      case "exclusive_insufficient":
+        return "No le alcanzan los puntos exclusivos de esa bolsa para ese premio.";
+      case "falta_migracion_0004":
+        return "Falta correr la migración 0004 en Supabase (SQL Editor, archivo supabase/migrations/0004_add_linked_bags.sql) y hacer Redeploy en Vercel. Sin ella, sumar, restar o canjear no guarda las bolsas exclusivas.";
       case "cantidad_invalida":
         return "La cantidad a canjear debe ser 1 o más.";
       case "already_reversed":
@@ -209,11 +215,16 @@ export default function Master() {
       ]);
       const err = [c, at, pt, p, e, r, a, ca, s].find((x) => x.error)?.error;
       if (err) { showMsg("err", `Error al cargar desde Supabase: ${err.message}`); return; }
+      // Bolsas exclusivas: se cargan aparte y se tolera que la tabla aún
+      // no exista (migración 0004 sin correr): en ese caso quedan en [].
+      const bagsRes = await supabase.from("collaborator_bags").select("*");
+      const bags = (bagsRes.error ? [] : (bagsRes.data as CollaboratorBag[]) || []) as CollaboratorBag[];
       setState((prev) => ({
         collaborators: ((c.data as Collaborator[]) || prev.collaborators).map((x) => ({ ...x, punctuality_points: (x as Collaborator).punctuality_points ?? 0, area: x.area ?? null })),
-        action_types: (at.data as ActionType[])?.length ? (at.data as ActionType[]) : prev.action_types,
+        action_types: (at.data as ActionType[])?.length ? (at.data as ActionType[]).map((x) => ({ ...x, linked_prize_id: (x as ActionType).linked_prize_id ?? null })) : prev.action_types,
         penalty_types: (pt.data as PenaltyType[])?.length ? (pt.data as PenaltyType[]) : prev.penalty_types,
         prizes: p.data || prev.prizes,
+        bags,
         events: e.data || prev.events,
         redemptions: r.data || prev.redemptions,
         announcements: a.data || prev.announcements,
@@ -242,6 +253,26 @@ export default function Master() {
   const directAffords = directParticipant && directPrize ? directParticipant.points >= directTotalCost : false;
   const directPunctualityAffords = !directIsPunctuality || directPunctuality >= directTotalCost;
   const directInStock = directPrize ? directPrize.stock >= directQtySafe : false;
+  // Bolsa exclusiva del premio seleccionado para ese colaborador:
+  // puntualidad si es el bono, o su bolsa en collaborator_bags.
+  const directExclusive = directPrize ? exclusivePrizeInfo(directPrize, state.action_types, state.prizes) : { exclusive: false, actionLabels: [] as string[] };
+  const directBag = directPrize ? (directIsPunctuality ? directPunctuality : (state.bags.find((b) => b.collaborator_id === directParticipant?.id && b.prize_id === directPrize.id)?.points ?? 0)) : 0;
+  const directUnitsAvailable = directPrize ? unitsAvailable(directExclusive.exclusive ? directBag : (directParticipant?.points ?? 0), directPrize.cost) : 0;
+  const directBagAffords = !directExclusive.exclusive || directBag >= directTotalCost;
+  // Bolsas exclusivas de un colaborador (solo las que tienen puntos y
+  // corresponden a un premio exclusivo): para mostrarlas en SUMAR y en
+  // el canje. La puntualidad va aparte, con su propio saldo.
+  function bagsSummary(collaboratorId: number): { prizeName: string; points: number }[] {
+    const c = state.collaborators.find((x) => x.id === collaboratorId);
+    if (!c) return [];
+    const out: { prizeName: string; points: number }[] = [];
+    for (const p of state.prizes) {
+      if (!exclusivePrizeInfo(p, state.action_types, state.prizes).exclusive) continue;
+      const pts = isPunctualityPrize(p.name) ? (c.punctuality_points ?? 0) : (state.bags.find((b) => b.collaborator_id === collaboratorId && b.prize_id === p.id)?.points ?? 0);
+      if (pts > 0) out.push({ prizeName: p.name, points: pts });
+    }
+    return out;
+  }
   // Nota: el botón de canjear NO se deshabilita cuando no alcanza: al
   // confirmar, el servidor valida y muestra el mensaje exacto (por
   // ejemplo, el NO CUMPLES de los bonos de puntualidad).
@@ -280,7 +311,10 @@ export default function Master() {
     setBusy(true);
     try {
       const res = await awardPoints(collab.id, a.id, a.label, a.points);
-      if (res.ok) showMsg("ok", `+${fmt(res.points)} pts para ${collab.name}: ${a.label}${res.bonus_from ? ` (bono × de ${res.bonus_from})` : ""} — nuevo saldo: ${fmt(res.newPoints)} pts${res.punctualityDelta > 0 ? ` · Puntualidad: ${fmt(res.newPunctualityPoints)} pts` : ""}`);
+      if (res.ok) {
+        const linkedName = res.linkedPrizeId != null ? state.prizes.find((p) => p.id === res.linkedPrizeId)?.name : null;
+        showMsg("ok", `+${fmt(res.points)} pts para ${collab.name}: ${a.label}${res.bonus_from ? ` (bono × de ${res.bonus_from})` : ""} — nuevo saldo: ${fmt(res.newPoints)} pts${res.punctualityDelta > 0 ? ` · Puntualidad: ${fmt(res.newPunctualityPoints)} pts` : ""}${linkedName ? ` · Bolsa «${linkedName}»: ${fmt(res.bagAfter ?? 0)} pts` : ""}`);
+      }
       else showMsg("err", humanError(res.error));
     } catch (e) {
       showMsg("err", `Error al sumar puntos: ${e instanceof Error ? e.message : String(e)}`);
@@ -345,7 +379,7 @@ export default function Master() {
     try {
       const res = await directRedeem(directParticipant.id, directPrize.id, directQtySafe);
       setDirectConfirm(false);
-      if (res.ok) setDirectMsg(`Canje registrado: ${directParticipant.name} canjeó ${res.quantity > 1 ? `${res.quantity}x «${directPrize.name}»` : `«${directPrize.name}»`} y se le descontaron ${fmt(res.totalCost)} pts${res.punctualityUsed > 0 ? ` (${fmt(res.punctualityUsed)} de puntualidad)` : ""}. Quedó con ${fmt(res.newPoints)} pts · Puntualidad: ${fmt(res.newPunctualityPoints)} pts. El inventario de ese premio bajó a ${fmt(Math.max(0, directPrize.stock - res.quantity))} disponible${directPrize.stock - res.quantity === 1 ? "" : "s"}${directPrize.stock - res.quantity <= 0 ? " (AGOTADO)" : ""}. Ya se ve en La Carrera como objeto canjeado y en el recuadro de Canjes realizados.`);
+      if (res.ok) setDirectMsg(`Canje registrado: ${directParticipant.name} canjeó ${res.quantity > 1 ? `${res.quantity}x «${directPrize.name}»` : `«${directPrize.name}»`} y se le descontaron ${fmt(res.totalCost)} pts${res.punctualityUsed > 0 ? ` (${fmt(res.punctualityUsed)} de puntualidad)` : directExclusive.exclusive && !directIsPunctuality ? ` (${fmt(res.totalCost)} de su bolsa «${directPrize.name}»)` : ""}. Quedó con ${fmt(res.newPoints)} pts · Puntualidad: ${fmt(res.newPunctualityPoints)} pts. El inventario de ese premio bajó a ${fmt(Math.max(0, directPrize.stock - res.quantity))} disponible${directPrize.stock - res.quantity === 1 ? "" : "s"}${directPrize.stock - res.quantity <= 0 ? " (AGOTADO)" : ""}. Ya se ve en La Carrera como objeto canjeado y en el recuadro de Canjes realizados.`);
       else setDirectMsg("message" in res && res.message ? res.message : humanError(res.error));
     } catch (e) {
       setDirectConfirm(false);
@@ -358,7 +392,7 @@ export default function Master() {
       const res = await resolveRedemption(id, approve);
       const req = state.redemptions.find((r) => r.id === id);
       const reqQty = Math.max(1, Math.trunc(Number(req?.quantity ?? 1)));
-      if (!res.ok) setDirectMsg("message" in res && res.message ? res.message : humanError(res.error));
+      if (!res.ok) setDirectMsg((res as unknown as { message?: string }).message ? (res as unknown as { message: string }).message : humanError(res.error));
       else if (res.approved) setDirectMsg(req ? `Canje aprobado: se descontaron ${fmt(req.cost)} pts a ${nameOf(req.collaborator_id)} por ${reqQty > 1 ? `${reqQty}x «${req.prize_name}»` : `«${req.prize_name}»`} y quedó registrado en el historial.` : "Canje aprobado y puntos descontados.");
       else setDirectMsg(req ? `Solicitud rechazada: ${nameOf(req.collaborator_id)} pidió «${req.prize_name}» y no se descontó ningún punto. Quedó registrada como rechazada.` : "Solicitud rechazada. No se descontó ningún punto.");
     } catch (e) {
@@ -479,11 +513,12 @@ export default function Master() {
     if (!newActionName.trim() || !(Number(newActionPoints) > 0)) return;
     setBusy(true);
     try {
-      const res = await addActionType(newActionName.trim(), Math.trunc(Number(newActionPoints)));
+      const linked = newActionLinked ? Number(newActionLinked) : null;
+      const res = await addActionType(newActionName.trim(), Math.trunc(Number(newActionPoints)), linked);
       if (!res.ok) { showMsg("err", humanError(res.error)); return; }
-      setNewActionName(""); setNewActionPoints("");
+      setNewActionName(""); setNewActionPoints(""); setNewActionLinked("");
       await refresh();
-      showMsg("ok", "Acción agregada: ya aparece en SUMAR PUNTOS");
+      showMsg("ok", linked ? "Acción agregada y ligada: sus puntos también suman a la bolsa de ese premio" : "Acción agregada: ya aparece en SUMAR PUNTOS");
     } catch (e) {
       showMsg("err", `Error al agregar la acción: ${e instanceof Error ? e.message : String(e)}`);
     } finally { setBusy(false); }
@@ -492,7 +527,8 @@ export default function Master() {
     if (!editActionName.trim() || !(Number(editActionPoints) > 0)) return;
     setBusy(true);
     try {
-      const res = await updateActionType(id, editActionName.trim(), Math.trunc(Number(editActionPoints)));
+      const linked = editActionLinked ? Number(editActionLinked) : null;
+      const res = await updateActionType(id, editActionName.trim(), Math.trunc(Number(editActionPoints)), linked);
       if (!res.ok) { showMsg("err", humanError(res.error)); return; }
       setEditingAction(null);
       await refresh();
@@ -716,19 +752,26 @@ export default function Master() {
           )}
           <p className="mt-4 text-sm font-semibold text-[var(--text)]">¿Qué hizo?</p>
           <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            {actions.map((a) => (
+            {actions.map((a) => {
+              const linkedId = linkedPrizeForAction(a, state.prizes);
+              const linkedName = linkedId != null ? state.prizes.find((p) => p.id === linkedId)?.name : null;
+              return (
               <button key={a.id} type="button" disabled={!collab || busy} aria-label={`Sumar ${a.points} puntos por ${a.label}`} onClick={() => doAward(a)} className="flex min-h-12 items-center justify-between gap-2 rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-left disabled:opacity-40">
-                <span className="text-sm font-semibold text-[var(--text)]">{a.label}</span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-[var(--text)]">{a.label}</span>
+                  {linkedName && <span className="block truncate text-xs text-[var(--dim)]">🔒 También suma a la bolsa de «{linkedName}»</span>}
+                </span>
                 <span className="font-pixel shrink-0 text-[11px] text-[var(--green)]">+{fmt(a.points)}</span>
               </button>
-            ))}
+              );
+            })}
           </div>
           <form className="mt-4 flex flex-col gap-2 border-t-2 border-dashed border-[var(--border)] pt-4 sm:flex-row" onSubmit={(e) => { e.preventDefault(); doCustomAward(); }}>
             <input aria-label="Puntos personalizados (pueden ser negativos)" type="number" inputMode="numeric" placeholder="Pts (+ o −)" className={`${inputCls} sm:w-32`} value={customAwardPoints} onChange={(e) => setCustomAwardPoints(e.target.value)} />
             <input aria-label="Motivo del ajuste" type="text" placeholder="Motivo (ej. Bonus del mes)" className={`${inputCls} flex-1`} value={customAwardLabel} onChange={(e) => setCustomAwardLabel(e.target.value)} />
             <button type="submit" className={btnPrimary} disabled={busy}>APLICAR</button>
           </form>
-          {collab && <div className="mt-3 flex items-center gap-2"><PixelAvatar sprite={collab.sprite} points={collab.points} size={40} /><span>{collab.name} — {collab.points} pts · Puntualidad: {fmt(collab.punctuality_points ?? 0)} pts</span></div>}
+          {collab && <div className="mt-3 flex items-center gap-2"><PixelAvatar sprite={collab.sprite} points={collab.points} size={40} /><span>{collab.name} — {collab.points} pts · Puntualidad: {fmt(collab.punctuality_points ?? 0)} pts{bagsSummary(collab.id).filter((b) => !isPunctualityPrize(b.prizeName)).map((b) => ` · Bolsa «${b.prizeName}»: ${fmt(b.points)} pts`).join("")}</span></div>}
         </section>
 
         {/* Colaboradores — como el Master: agregar, editar y eliminar colaboradores con su monito */}
@@ -784,33 +827,48 @@ export default function Master() {
         {/* Acciones y puntos — como el Master: editar, agregar y eliminar acciones */}
         <section aria-label="Acciones que dan puntos" className="panel p-4 sm:p-5">
           <h2 className="font-pixel text-sm text-[var(--text)]">ACCIONES Y PUNTOS</h2>
-          <p className="mt-2 text-sm text-[var(--dim)]">Estas son las acciones que aparecen en SUMAR PUNTOS. Si cambias los puntos de una acción, el botón de SUMAR PUNTOS ya suma el valor nuevo. Las marcadas <strong className="text-[var(--text)]">PUNTUALIDAD</strong> también suman al sub-saldo de puntualidad del colaborador (check-in puntual, semana sin faltas y mes perfecto): solo con ese sub-saldo se canjea el BONO DE PUNTUALIDAD.</p>
+          <p className="mt-2 text-sm text-[var(--dim)]">Estas son las acciones que aparecen en SUMAR PUNTOS. Si cambias los puntos de una acción, el botón de SUMAR PUNTOS ya suma el valor nuevo. Las marcadas <strong className="text-[var(--text)]">PUNTUALIDAD</strong> también suman al sub-saldo de puntualidad del colaborador (check-in puntual, semana sin faltas y mes perfecto): solo con ese sub-saldo se canjea el BONO DE PUNTUALIDAD. Con <strong className="text-[var(--text)]">Premio ligado</strong> haces lo mismo con cualquier acción y premio: sus puntos suman al total y también a la bolsa de ese premio, y solo con esa bolsa se puede canjear ese premio. Si no se canjea, esos puntos se quedan y suman para los premios generales.</p>
           <ul className="mt-3 flex flex-col divide-y divide-[var(--border)]">
             {actions.map((a) => (
               <li key={a.id} className="py-2.5">
                 {editingAction === a.id ? (
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <input aria-label="Nombre de la acción" type="text" className={`${inputCls} flex-1`} value={editActionName} onChange={(e) => setEditActionName(e.target.value)} />
-                    <input aria-label="Puntos de la acción" type="number" inputMode="numeric" className={`${inputCls} sm:w-28`} value={editActionPoints} onChange={(e) => setEditActionPoints(e.target.value)} />
-                    <button type="button" className={btnPrimary} disabled={busy || !editActionName.trim() || !(Number(editActionPoints) > 0)} aria-label={`Guardar acción ${a.label}`} onClick={() => doSaveAction(a.id)}>GUARDAR</button>
-                    <button type="button" className="min-h-11 rounded-md border-2 border-[var(--border)] px-4 py-2 text-sm font-bold text-[var(--dim)]" onClick={() => setEditingAction(null)}>Cancelar</button>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <input aria-label="Nombre de la acción" type="text" className={`${inputCls} flex-1`} value={editActionName} onChange={(e) => setEditActionName(e.target.value)} />
+                      <input aria-label="Puntos de la acción" type="number" inputMode="numeric" className={`${inputCls} sm:w-28`} value={editActionPoints} onChange={(e) => setEditActionPoints(e.target.value)} />
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <select aria-label="Premio ligado a esta acción" className={`${inputCls} flex-1`} value={editActionLinked} onChange={(e) => setEditActionLinked(e.target.value)}>
+                        <option value="">Premio ligado: ninguno (solo suma al total)</option>
+                        {state.prizes.map((p) => <option key={p.id} value={p.id}>🔒 {p.name} — {fmt(p.cost)} pts</option>)}
+                      </select>
+                      <button type="button" className={btnPrimary} disabled={busy || !editActionName.trim() || !(Number(editActionPoints) > 0)} aria-label={`Guardar acción ${a.label}`} onClick={() => doSaveAction(a.id)}>GUARDAR</button>
+                      <button type="button" className="min-h-11 rounded-md border-2 border-[var(--border)] px-4 py-2 text-sm font-bold text-[var(--dim)]" onClick={() => setEditingAction(null)}>Cancelar</button>
+                    </div>
                   </div>
                 ) : (
                   <div className="flex items-center gap-3">
                     <p className="min-w-0 flex-1 text-sm text-[var(--text)]">{a.label}</p>
                     {isPunctualityAction(a.id, a.label) && <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>PUNTUALIDAD</span>}
+                    {(() => { const lid = linkedPrizeForAction(a, state.prizes); const lname = lid != null ? state.prizes.find((p) => p.id === lid)?.name : null; return lname && !isPunctualityPrize(lname) ? <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>🔒 {lname}</span> : null; })()}
                     <span className="font-pixel shrink-0 text-[11px] text-[var(--green)]">+{fmt(a.points)}</span>
-                    <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar acción ${a.label}`} onClick={() => { setEditingAction(a.id); setEditActionName(a.label); setEditActionPoints(String(a.points)); }}>Editar</button>
+                    <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar acción ${a.label}`} onClick={() => { setEditingAction(a.id); setEditActionName(a.label); setEditActionPoints(String(a.points)); setEditActionLinked(linkedPrizeForAction(a, state.prizes) != null ? String(linkedPrizeForAction(a, state.prizes)) : ""); }}>Editar</button>
                     <button type="button" className={btnDanger} disabled={busy} aria-label={`Eliminar acción ${a.label}`} onClick={() => doRemoveAction(a.id, a.label)}>Eliminar</button>
                   </div>
                 )}
               </li>
             ))}
           </ul>
-          <form className="mt-4 flex flex-col gap-2 border-t-2 border-dashed border-[var(--border)] pt-4 sm:flex-row" onSubmit={(e) => { e.preventDefault(); doAddAction(); }}>
-            <input aria-label="Nombre de la nueva acción" type="text" placeholder="Nueva acción (ej. Meta semanal cumplida)" className={`${inputCls} flex-1`} value={newActionName} onChange={(e) => setNewActionName(e.target.value)} />
-            <input aria-label="Puntos de la nueva acción" type="number" inputMode="numeric" placeholder="Pts" className={`${inputCls} sm:w-28`} value={newActionPoints} onChange={(e) => setNewActionPoints(e.target.value)} />
-            <button type="submit" className={btnPrimary} disabled={busy || !newActionName.trim() || !(Number(newActionPoints) > 0)}>AGREGAR</button>
+          <form className="mt-4 flex flex-col gap-2 border-t-2 border-dashed border-[var(--border)] pt-4" onSubmit={(e) => { e.preventDefault(); doAddAction(); }}>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input aria-label="Nombre de la nueva acción" type="text" placeholder="Nueva acción (ej. Meta semanal cumplida)" className={`${inputCls} flex-1`} value={newActionName} onChange={(e) => setNewActionName(e.target.value)} />
+              <input aria-label="Puntos de la nueva acción" type="number" inputMode="numeric" placeholder="Pts" className={`${inputCls} sm:w-28`} value={newActionPoints} onChange={(e) => setNewActionPoints(e.target.value)} />
+              <button type="submit" className={btnPrimary} disabled={busy || !newActionName.trim() || !(Number(newActionPoints) > 0)}>AGREGAR</button>
+            </div>
+            <select aria-label="Premio ligado a la nueva acción" className={`${inputCls} w-full`} value={newActionLinked} onChange={(e) => setNewActionLinked(e.target.value)}>
+              <option value="">Premio ligado: ninguno (solo suma al total)</option>
+              {state.prizes.map((p) => <option key={p.id} value={p.id}>🔒 {p.name} — {fmt(p.cost)} pts</option>)}
+            </select>
           </form>
         </section>
 
@@ -919,7 +977,7 @@ export default function Master() {
           <p className="mt-2 text-sm text-[var(--dim)]">La Carrera ya es solo visual: los colaboradores no tocan nada, piden su premio en persona con <strong className="text-[var(--text)]">RRHH</strong> y <strong className="text-[var(--text)]">solo tú, el Master, registras el canje aquí</strong>. Usa el canje directo de abajo (seleccionas quién y qué premio, y se descuentan los puntos al confirmar) o aprueba una solicitud pendiente anterior. Al canjear, en La Carrera ese premio se marca «Te lo ganaron · Objeto canjeado» y el canje aparece arriba en el recuadro de Canjes realizados.</p>
           <div className="mt-4 rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] px-3 py-3 sm:px-4">
             <h3 className="font-pixel text-xs text-[var(--text)]">CANJE DIRECTO · SOLO MASTER</h3>
-            <p className="mt-1.5 text-sm text-[var(--dim)]">El colaborador te pidió el premio en RRHH / en persona. Selecciónalo aquí junto con el premio y <strong className="text-[var(--text)]">cuántos quiere canjear</strong>: al confirmar se le descuentan los puntos y queda registrado como canjeado. El BONO DE PUNTUALIDAD solo se paga con puntos de puntualidad, no con puntos de ventas.</p>
+            <p className="mt-1.5 text-sm text-[var(--dim)]">El colaborador te pidió el premio en RRHH / en persona. Selecciónalo aquí junto con el premio y <strong className="text-[var(--text)]">cuántos quiere canjear</strong>: al confirmar se le descuentan los puntos y queda registrado como canjeado. El BONO DE PUNTUALIDAD solo se paga con puntos de puntualidad, no con puntos de ventas. Lo mismo aplica a cualquier premio con acciones ligadas (🔒 EXCLUSIVO): solo se paga con su bolsa.</p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <div>
                 <label htmlFor="direct-participant" className="block text-sm font-semibold text-[var(--text)]">¿Quién canjea?</label>
@@ -947,16 +1005,17 @@ export default function Master() {
               <div className="mt-2 text-sm text-[var(--text)]">
                 <p>
                   {directParticipant.name} tiene {fmt(directParticipant.points)} pts en total y {fmt(directPunctuality)} pts de puntualidad
-                  {directIsPunctuality ? ` — le alcanzan para ${fmt(directBonusesAvailable)} bono${directBonusesAvailable === 1 ? "" : "s"} de puntualidad` : ""}.
+                  {directIsPunctuality ? ` — le alcanzan para ${fmt(directBonusesAvailable)} bono${directBonusesAvailable === 1 ? "" : "s"} de puntualidad` : ""}
+                  {directExclusive.exclusive && !directIsPunctuality ? ` · Bolsa «${directPrize.name}»: ${fmt(directBag)} pts — le alcanzan para ${fmt(directUnitsAvailable)}` : ""}.
                 </p>
                 {!directInStock ? (
                   <p className="mt-1 font-bold" style={{ color: "var(--red)" }}>Solo quedan {fmt(directPrize.stock)} unidades de «{directPrize.name}», no se pueden canjear {directQtySafe}. Sube su inventario en la sección PREMIOS si tienes más.</p>
-                ) : directIsPunctuality && !directPunctualityAffords ? (
-                  <p className="mt-1 font-bold" style={{ color: "var(--red)" }}>NO CUMPLES CON LOS REQUERIMIENTOS PARA CANJEAR {directQtySafe} BONOS, solo cuentas con {directPunctuality} puntos que sí puedes canjear por BONOS.</p>
+                ) : directExclusive.exclusive && !directBagAffords ? (
+                  <p className="mt-1 font-bold" style={{ color: "var(--red)" }}>{directIsPunctuality ? `NO CUMPLES CON LOS REQUERIMIENTOS PARA CANJEAR ${directQtySafe} BONOS, solo cuentas con ${directPunctuality} puntos que sí puedes canjear por BONOS.` : `NO CUMPLES CON LOS REQUERIMIENTOS PARA CANJEAR ${directQtySafe} ${directPrize.name}, solo cuentas con ${fmt(directBag)} puntos${directExclusive.actionLabels.length ? ` de ${directExclusive.actionLabels.join(" / ")}` : ""} que sí puedes canjear por ${directPrize.name}.`}</p>
                 ) : !directAffords ? (
                   <p className="mt-1 font-bold" style={{ color: "var(--red)" }}>A {directParticipant.name} no le alcanzan: tiene {fmt(directParticipant.points)} pts y {directQtySafe} × «{directPrize.name}» cuestan {fmt(directTotalCost)} pts.</p>
                 ) : (
-                  <p className="mt-1">Quedaría con {fmt(directParticipant.points - directTotalCost)} pts{directIsPunctuality ? ` · Puntualidad: ${fmt(directPunctuality - directTotalCost)} pts` : ""} y el premio quedaría con {fmt(directPrize.stock - directQtySafe)} disponible{directPrize.stock - directQtySafe === 1 ? "" : "s"}.</p>
+                  <p className="mt-1">Quedaría con {fmt(directParticipant.points - directTotalCost)} pts{directIsPunctuality ? ` · Puntualidad: ${fmt(directPunctuality - directTotalCost)} pts` : directExclusive.exclusive ? ` · Bolsa «${directPrize.name}»: ${fmt(directBag - directTotalCost)} pts` : ""} y el premio quedaría con {fmt(directPrize.stock - directQtySafe)} disponible{directPrize.stock - directQtySafe === 1 ? "" : "s"}.</p>
                 )}
               </div>
             )}
@@ -1036,7 +1095,7 @@ export default function Master() {
         {/* Premios — como el Master */}
         <section aria-label="Administrar premios" className="panel p-4 sm:p-5">
           <h2 className="font-pixel text-sm text-[var(--text)]">PREMIOS</h2>
-          <p className="mt-2 text-sm text-[var(--dim)]">Cada premio muestra cuántas unidades quedan: <strong className="text-[var(--text)]">Disponibles</strong>. Sube o baja el inventario con los botones − / + o edítalo con el lápiz de cada premio. Cuando un colaborador canjea, el inventario baja según la cantidad canjeada; al llegar a 0 el premio se marca <strong className="text-[var(--text)]">Agotado</strong> y ya no se puede canjear. El <strong className="text-[var(--text)]">BONO DE PUNTUALIDAD</strong> (500 pts, stock 100) solo se canjea con puntos de puntualidad.</p>
+          <p className="mt-2 text-sm text-[var(--dim)]">Cada premio muestra cuántas unidades quedan: <strong className="text-[var(--text)]">Disponibles</strong>. Sube o baja el inventario con los botones − / + o edítalo con el lápiz de cada premio. Cuando un colaborador canjea, el inventario baja según la cantidad canjeada; al llegar a 0 el premio se marca <strong className="text-[var(--text)]">Agotado</strong> y ya no se puede canjear. El <strong className="text-[var(--text)]">BONO DE PUNTUALIDAD</strong> (500 pts, stock 100) solo se canjea con puntos de puntualidad. Los premios marcados <strong className="text-[var(--text)]">🔒 EXCLUSIVO</strong> son igual: solo se canjean con la bolsa de las acciones ligadas a ellos, que se eligen en ACCIONES Y PUNTOS.</p>
           <ul className="mt-3 flex flex-col divide-y divide-[var(--border)]">
             {state.prizes.map((prize) => (
               <li key={prize.id} className="py-2.5">
@@ -1052,6 +1111,7 @@ export default function Master() {
                   <div className="flex flex-wrap items-center gap-3">
                     <PrizeIcon icon={PRIZE_ICON[prize.id] || "gift"} size={34} />
                     <p className="min-w-0 flex-1 text-sm font-semibold text-[var(--text)]">{prize.name}</p>
+                    {(() => { const info = exclusivePrizeInfo(prize, state.action_types, state.prizes); return info.exclusive ? <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }} title={`Solo con puntos de: ${info.actionLabels.join(", ")}`}>🔒 EXCLUSIVO</span> : null; })()}
                     <span className="font-pixel shrink-0 text-[11px] text-[var(--accent)]">{fmt(prize.cost)} PTS</span>
                     <span className="chip inline-flex shrink-0 items-center gap-1 px-2.5 py-1 text-xs font-bold" style={prize.stock > 0 ? { color: "var(--green)", borderColor: "var(--green)" } : { color: "var(--red)", borderColor: "var(--red)" }}>
                       {prize.stock > 0 ? `Disponibles: ${fmt(prize.stock)}` : "Agotado"}

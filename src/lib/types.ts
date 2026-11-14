@@ -19,6 +19,23 @@ export interface ActionType {
   id: number;
   label: string;
   points: number;
+  // Premio ligado (opcional): los puntos de esta acción suman también a
+  // la bolsa exclusiva de ese premio (parte del saldo total, como la
+  // puntualidad). Solo con esa bolsa se puede canjear ese premio; si no
+  // se canjea, esos puntos se quedan y suman para los premios generales.
+  // null = acción general, solo suma al total.
+  linked_prize_id: number | null;
+}
+
+// Bolsa exclusiva de un colaborador para un premio: cuántos de sus
+// puntos totales se ganaron con acciones ligadas a ese premio.
+// La bolsa del BONO DE PUNTUALIDAD NO se guarda aquí: vive en
+// collaborators.punctuality_points (migración 0003) y se mantiene en
+// sincronía; las demás bolsas viven en collaborator_bags.
+export interface CollaboratorBag {
+  collaborator_id: number;
+  prize_id: number;
+  points: number;
 }
 
 export interface PenaltyType {
@@ -81,6 +98,7 @@ export interface GameState {
   action_types: ActionType[]; // Catálogo de acciones (12 en seed) — el Master lo edita
   penalty_types: PenaltyType[]; // Catálogo de faltas (4 en seed) — el Master lo edita
   prizes: Prize[];
+  bags: CollaboratorBag[]; // Bolsas exclusivas por colaborador y premio (sin puntualidad, que vive en punctuality_points)
   events: PointEvent[];
   redemptions: Redemption[];
   announcements: Announcement[]; // Merlín
