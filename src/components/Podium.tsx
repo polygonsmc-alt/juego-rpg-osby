@@ -46,7 +46,7 @@ export default function Podium({ collaborators }: { collaborators: Collaborator[
   return (
     <section aria-label="Podio: primero y segundo lugar">
       <h2 className="font-pixel mb-3 text-sm text-[var(--text)] sm:text-base">PODIO</h2>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <PlaceCard p={first} place={1} />
         {second ? (
           <PlaceCard p={second} place={2} />

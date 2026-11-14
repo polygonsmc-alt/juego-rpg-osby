@@ -696,15 +696,15 @@ export default function Master() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]" data-theme={state.settings.theme} data-season={state.settings.season}>
+    <div className="min-h-screen overflow-x-clip bg-[var(--bg)] text-[var(--text)]" data-theme={state.settings.theme} data-season={state.settings.season}>
       <main className="mx-auto w-full max-w-6xl px-3 pb-10 pt-4 sm:px-4">
         {(state.settings.company_name || state.settings.logo_url) && (
-          <div className="mb-5 flex items-center gap-3">
+          <div className="mb-5 flex flex-wrap items-center gap-3">
             {state.settings.logo_url && (
               <img src={state.settings.logo_url} alt={`Logo de ${state.settings.company_name ?? "la empresa"}`} className="h-12 w-auto max-w-40 rounded-md border-2 border-[var(--border)] bg-[var(--surface)] object-contain p-1" />
             )}
             {state.settings.company_name && (
-              <p className="font-pixel text-base text-[var(--text)] sm:text-lg">{state.settings.company_name}</p>
+              <p className="min-w-0 break-words font-pixel text-base text-[var(--text)] sm:text-lg">{state.settings.company_name}</p>
             )}
           </div>
         )}
@@ -751,13 +751,13 @@ export default function Master() {
             </p>
           )}
           <p className="mt-4 text-sm font-semibold text-[var(--text)]">¿Qué hizo?</p>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
             {actions.map((a) => {
               const linkedId = linkedPrizeForAction(a, state.prizes);
               const linkedName = linkedId != null ? state.prizes.find((p) => p.id === linkedId)?.name : null;
               return (
               <button key={a.id} type="button" disabled={!collab || busy} aria-label={`Sumar ${a.points} puntos por ${a.label}`} onClick={() => doAward(a)} className="flex min-h-12 items-center justify-between gap-2 rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-left disabled:opacity-40">
-                <span className="min-w-0">
+                <span className="min-w-0 flex-1">
                   <span className="block text-sm font-semibold text-[var(--text)]">{a.label}</span>
                   {linkedName && <span className="block truncate text-xs text-[var(--dim)]">🔒 También suma a la bolsa de «{linkedName}»</span>}
                 </span>
@@ -771,7 +771,7 @@ export default function Master() {
             <input aria-label="Motivo del ajuste" type="text" placeholder="Motivo (ej. Bonus del mes)" className={`${inputCls} flex-1`} value={customAwardLabel} onChange={(e) => setCustomAwardLabel(e.target.value)} />
             <button type="submit" className={btnPrimary} disabled={busy}>APLICAR</button>
           </form>
-          {collab && <div className="mt-3 flex items-center gap-2"><PixelAvatar sprite={collab.sprite} points={collab.points} size={40} /><span>{collab.name} — {collab.points} pts · Puntualidad: {fmt(collab.punctuality_points ?? 0)} pts{bagsSummary(collab.id).filter((b) => !isPunctualityPrize(b.prizeName)).map((b) => ` · Bolsa «${b.prizeName}»: ${fmt(b.points)} pts`).join("")}</span></div>}
+          {collab && <div className="mt-3 flex flex-wrap items-center gap-2"><PixelAvatar sprite={collab.sprite} points={collab.points} size={40} /><span className="min-w-0 flex-1">{collab.name} — {collab.points} pts · Puntualidad: {fmt(collab.punctuality_points ?? 0)} pts{bagsSummary(collab.id).filter((b) => !isPunctualityPrize(b.prizeName)).map((b) => ` · Bolsa «${b.prizeName}»: ${fmt(b.points)} pts`).join("")}</span></div>}
         </section>
 
         {/* Colaboradores — como el Master: agregar, editar y eliminar colaboradores con su monito */}
@@ -801,20 +801,24 @@ export default function Master() {
                       </div>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-3">
-                      <PixelAvatar sprite={p.sprite} points={p.points} size={36} />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-bold text-[var(--text)]">{p.name}</p>
-                        {p.area && <p className="truncate text-xs text-[var(--dim)]">Área: {p.area}</p>}
-                        <p className="text-xs text-[var(--dim)]">{fmt(p.points)} pts · {levelFor(p.points)} · Puntualidad: {fmt(p.punctuality_points ?? 0)} pts</p>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
+                        <PixelAvatar sprite={p.sprite} points={p.points} size={36} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-bold text-[var(--text)]">{p.name}</p>
+                          {p.area && <p className="truncate text-xs text-[var(--dim)]">Área: {p.area}</p>}
+                          <p className="text-xs text-[var(--dim)]">{fmt(p.points)} pts · {levelFor(p.points)} · Puntualidad: {fmt(p.punctuality_points ?? 0)} pts</p>
+                        </div>
                       </div>
-                      <TierBadge points={p.points} />
-                      <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar a ${p.name}`} onClick={() => { setEditingCollab(p.id); setEditCollabName(p.name); setEditCollabSprite(p.sprite); setEditCollabArea(p.area ?? ""); setConfirmDeleteCollab(null); }}>Editar</button>
-                      {confirmDeleteCollab === p.id ? (
-                        <button type="button" className={btnDanger} disabled={busy} aria-label={`Confirmar eliminar a ${p.name}`} onClick={() => doRemoveCollaborator(p.id, p.name)}>¿Seguro?</button>
-                      ) : (
-                        <button type="button" className={btnDanger} aria-label={`Eliminar a ${p.name}`} onClick={() => setConfirmDeleteCollab(p.id)}>Eliminar</button>
-                      )}
+                      <div className="flex flex-wrap items-center gap-2 max-sm:basis-full">
+                        <TierBadge points={p.points} />
+                        <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar a ${p.name}`} onClick={() => { setEditingCollab(p.id); setEditCollabName(p.name); setEditCollabSprite(p.sprite); setEditCollabArea(p.area ?? ""); setConfirmDeleteCollab(null); }}>Editar</button>
+                        {confirmDeleteCollab === p.id ? (
+                          <button type="button" className={btnDanger} disabled={busy} aria-label={`Confirmar eliminar a ${p.name}`} onClick={() => doRemoveCollaborator(p.id, p.name)}>¿Seguro?</button>
+                        ) : (
+                          <button type="button" className={btnDanger} aria-label={`Eliminar a ${p.name}`} onClick={() => setConfirmDeleteCollab(p.id)}>Eliminar</button>
+                        )}
+                      </div>
                     </div>
                   )}
                 </li>
@@ -847,12 +851,16 @@ export default function Master() {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-3">
-                    <p className="min-w-0 flex-1 text-sm text-[var(--text)]">{a.label}</p>
-                    {(() => { const lid = linkedPrizeForAction(a, state.prizes); const lname = lid != null ? state.prizes.find((p) => p.id === lid)?.name : null; const isPunt = isPunctualityAction(a.id, a.label) || (lname != null && isPunctualityPrize(lname)); if (isPunt) return <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>PUNTUALIDAD</span>; if (lname) return <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>🔒 {lname}</span>; return null; })()}
-                    <span className="font-pixel shrink-0 text-[11px] text-[var(--green)]">+{fmt(a.points)}</span>
-                    <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar acción ${a.label}`} onClick={() => { setEditingAction(a.id); setEditActionName(a.label); setEditActionPoints(String(a.points)); setEditActionLinked(linkedPrizeForAction(a, state.prizes) != null ? String(linkedPrizeForAction(a, state.prizes)) : ""); }}>Editar</button>
-                    <button type="button" className={btnDanger} disabled={busy} aria-label={`Eliminar acción ${a.label}`} onClick={() => doRemoveAction(a.id, a.label)}>Eliminar</button>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                      <p className="min-w-0 flex-1 text-sm text-[var(--text)]">{a.label}</p>
+                      {(() => { const lid = linkedPrizeForAction(a, state.prizes); const lname = lid != null ? state.prizes.find((p) => p.id === lid)?.name : null; const isPunt = isPunctualityAction(a.id, a.label) || (lname != null && isPunctualityPrize(lname)); if (isPunt) return <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>PUNTUALIDAD</span>; if (lname) return <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>🔒 {lname}</span>; return null; })()}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2 max-sm:basis-full">
+                      <span className="font-pixel text-[11px] text-[var(--green)]">+{fmt(a.points)}</span>
+                      <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar acción ${a.label}`} onClick={() => { setEditingAction(a.id); setEditActionName(a.label); setEditActionPoints(String(a.points)); setEditActionLinked(linkedPrizeForAction(a, state.prizes) != null ? String(linkedPrizeForAction(a, state.prizes)) : ""); }}>Editar</button>
+                      <button type="button" className={btnDanger} disabled={busy} aria-label={`Eliminar acción ${a.label}`} onClick={() => doRemoveAction(a.id, a.label)}>Eliminar</button>
+                    </div>
                   </div>
                 )}
               </li>
@@ -886,12 +894,16 @@ export default function Master() {
                     <button type="button" className="min-h-11 rounded-md border-2 border-[var(--border)] px-4 py-2 text-sm font-bold text-[var(--dim)]" onClick={() => setEditingPenalty(null)}>Cancelar</button>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-3">
-                    <p className="min-w-0 flex-1 text-sm text-[var(--text)]">{pen.label}</p>
-                    {isPunctualityPenalty(pen.label) && <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--red)", borderColor: "var(--red)" }}>PUNTUALIDAD</span>}
-                    <span className="font-pixel shrink-0 text-[11px]" style={{ color: "var(--red)" }}>−{fmt(Math.abs(pen.points))}</span>
-                    <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar falta ${pen.label}`} onClick={() => { setEditingPenalty(pen.id); setEditPenaltyName(pen.label); setEditPenaltyPoints(String(Math.abs(pen.points))); }}>Editar</button>
-                    <button type="button" className={btnDanger} disabled={busy} aria-label={`Eliminar falta ${pen.label}`} onClick={() => doRemovePenalty(pen.id, pen.label)}>Eliminar</button>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                      <p className="min-w-0 flex-1 text-sm text-[var(--text)]">{pen.label}</p>
+                      {isPunctualityPenalty(pen.label) && <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--red)", borderColor: "var(--red)" }}>PUNTUALIDAD</span>}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2 max-sm:basis-full">
+                      <span className="font-pixel text-[11px]" style={{ color: "var(--red)" }}>−{fmt(Math.abs(pen.points))}</span>
+                      <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar falta ${pen.label}`} onClick={() => { setEditingPenalty(pen.id); setEditPenaltyName(pen.label); setEditPenaltyPoints(String(Math.abs(pen.points))); }}>Editar</button>
+                      <button type="button" className={btnDanger} disabled={busy} aria-label={`Eliminar falta ${pen.label}`} onClick={() => doRemovePenalty(pen.id, pen.label)}>Eliminar</button>
+                    </div>
                   </div>
                 )}
               </li>
@@ -930,7 +942,7 @@ export default function Master() {
           ) : (
             <ul className="mt-2 flex flex-col divide-y divide-[var(--border)]">
               {shownEvents.map((e) => (
-                <li key={e.id} className="flex items-center gap-3 py-2.5 text-sm">
+                <li key={e.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5 text-sm">
                   <div className={`min-w-0 flex-1 ${e.reversed ? "opacity-60" : ""}`}>
                     <span className="font-semibold text-[var(--text)]">{nameOf(e.collaborator_id)}</span>{" "}
                     <span className={`text-[var(--dim)] ${e.reversed ? "line-through" : ""}`}>{e.label}</span>{" "}
@@ -952,10 +964,10 @@ export default function Master() {
             {state.collaborators.map((p) => <option key={p.id} value={p.id}>{p.name} — {fmt(p.points)} pts</option>)}
           </select>
           <p className="mt-4 text-sm font-semibold text-[var(--text)]">¿Qué falta cometió?</p>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
             {penalties.map((pen) => (
               <button key={pen.id} type="button" disabled={!penaltyTarget || busy} aria-label={`Restar ${Math.abs(pen.points)} puntos a ${penaltyTarget?.name ?? ""} por ${pen.label}`} onClick={() => doDeduct(pen)} className="flex min-h-12 items-center justify-between gap-2 rounded-md border-2 bg-[var(--surface-alt)] px-3 py-2 text-left disabled:opacity-40" style={{ borderColor: "var(--red)" }}>
-                <span className="text-sm font-semibold text-[var(--text)]">{pen.label}</span>
+                <span className="min-w-0 flex-1 text-sm font-semibold text-[var(--text)]">{pen.label}</span>
                 <span className="font-pixel shrink-0 text-[11px]" style={{ color: "var(--red)" }}>−{fmt(Math.abs(pen.points))}</span>
               </button>
             ))}
@@ -977,14 +989,14 @@ export default function Master() {
           <div className="mt-4 rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] px-3 py-3 sm:px-4">
             <h3 className="font-pixel text-xs text-[var(--text)]">CANJE DIRECTO · SOLO MASTER</h3>
             <p className="mt-1.5 text-sm text-[var(--dim)]">El colaborador te pidió el premio en RRHH / en persona. Selecciónalo aquí junto con el premio y <strong className="text-[var(--text)]">cuántos quiere canjear</strong>: al confirmar se le descuentan los puntos y queda registrado como canjeado. El BONO DE PUNTUALIDAD solo se paga con puntos de puntualidad, no con puntos de ventas. Lo mismo aplica a cualquier premio con acciones ligadas (🔒 EXCLUSIVO): solo se paga con su bolsa.</p>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              <div>
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="min-w-0">
                 <label htmlFor="direct-participant" className="block text-sm font-semibold text-[var(--text)]">¿Quién canjea?</label>
                 <select id="direct-participant" aria-label="Colaborador que canjea el premio" className={`${inputCls} mt-1 w-full`} value={directParticipant?.id ?? ""} onChange={(e) => { setDirectCollabId(Number(e.target.value)); setDirectConfirm(false); setDirectMsg(null); }}>
                   {state.collaborators.map((p) => <option key={p.id} value={p.id}>{p.name} — {fmt(p.points)} pts · Puntualidad: {fmt(p.punctuality_points ?? 0)} pts</option>)}
                 </select>
               </div>
-              <div>
+              <div className="min-w-0">
                 <label htmlFor="direct-prize" className="block text-sm font-semibold text-[var(--text)]">¿Qué premio?</label>
                 <select id="direct-prize" aria-label="Premio a canjear" className={`${inputCls} mt-1 w-full`} value={directPrize?.id ?? ""} onChange={(e) => { setPrizeId(Number(e.target.value)); setDirectConfirm(false); setDirectMsg(null); }}>
                   {state.prizes.map((p) => <option key={p.id} value={p.id}>{p.name} — {fmt(p.cost)} pts · {p.stock > 0 ? `Disponibles: ${fmt(p.stock)}` : "AGOTADO"}</option>)}
@@ -993,7 +1005,7 @@ export default function Master() {
             </div>
             <div className="mt-3">
               <label htmlFor="direct-qty" className="block text-sm font-semibold text-[var(--text)]">¿Cuántos desea canjear?</label>
-              <div className="mt-1 flex items-center gap-2">
+              <div className="mt-1 flex flex-wrap items-center gap-2">
                 <button type="button" className="flex h-10 w-10 items-center justify-center rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] text-lg font-bold text-[var(--text)] disabled:opacity-40" disabled={directQtySafe <= 1 || busy} aria-label="Quitar una unidad" onClick={() => { setDirectQty((q) => Math.max(1, Math.trunc(Number(q) || 1) - 1)); setDirectConfirm(false); setDirectMsg(null); }}>−</button>
                 <input id="direct-qty" aria-label="Cantidad a canjear" type="number" inputMode="numeric" min={1} className={`${inputCls} w-24 text-center`} value={directQty} onChange={(e) => { setDirectQty(Math.max(1, Math.trunc(Number(e.target.value) || 1))); setDirectConfirm(false); setDirectMsg(null); }} />
                 <button type="button" className="flex h-10 w-10 items-center justify-center rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] text-lg font-bold text-[var(--text)] disabled:opacity-40" disabled={busy} aria-label="Agregar una unidad" onClick={() => { setDirectQty((q) => Math.max(1, Math.trunc(Number(q) || 1) + 1)); setDirectConfirm(false); setDirectMsg(null); }}>+</button>
@@ -1069,7 +1081,7 @@ export default function Master() {
               <h3 className="font-pixel mt-5 text-xs text-[var(--text)]">SOLICITUDES YA RESUELTAS</h3>
               <ul className="mt-2 flex flex-col divide-y divide-[var(--border)]">
                 {resolvedRedemptions.slice(0, 10).map((r) => (
-                  <li key={r.id} className="flex items-center gap-3 py-2.5 text-sm">
+                  <li key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5 text-sm">
                     <div className="min-w-0 flex-1">
                       <span className="font-semibold text-[var(--text)]">{nameOf(r.collaborator_id)}</span>{" "}
                       <span className="text-[var(--dim)]">solicitó {Math.max(1, Math.trunc(Number((r as { quantity?: number }).quantity ?? 1))) > 1 ? `${Math.max(1, Math.trunc(Number((r as { quantity?: number }).quantity ?? 1)))}x ${r.prize_name}` : r.prize_name} ({fmt(r.cost)} pts)</span>
@@ -1209,7 +1221,7 @@ export default function Master() {
             ))}
           </div>
           <p className="mt-2 text-sm text-[var(--dim)]">{seasonOption.hint}</p>
-          <div className="mt-4 flex items-end gap-4 rounded-md border-2 border-[var(--border)] px-4 py-3" style={{ background: "var(--track)" }}>
+          <div className="mt-4 flex flex-wrap items-end gap-4 rounded-md border-2 border-[var(--border)] px-4 py-3" style={{ background: "var(--track)" }}>
             <span className="flex shrink-0 flex-col items-center gap-1">
               <Merlin season={state.settings.season} size={54} caption={false} sleigh={state.settings.season === "navidad"} />
             </span>
@@ -1230,7 +1242,7 @@ export default function Master() {
           ) : (
             <ul className="mt-3 flex flex-col divide-y divide-[var(--border)]">
               {state.events.map((e) => (
-                <li key={e.id} className="flex items-center gap-3 py-2.5 text-sm">
+                <li key={e.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5 text-sm">
                   <div className={`min-w-0 flex-1 ${e.reversed ? "opacity-60" : ""}`}>
                     <span className="font-semibold text-[var(--text)]">{nameOf(e.collaborator_id)}</span>{" "}
                     <span className={`text-[var(--dim)] ${e.reversed ? "line-through" : ""}`}>{e.label}</span>{" "}
