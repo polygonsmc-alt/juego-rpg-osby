@@ -12,8 +12,19 @@ nivel Novato, empatados.
   `Agotado`, recuadro `Canjes realizados`.
 - **Panel Master (`/master`)** — solo Osbed: sumar / restar puntos, deshacer
   último movimiento y por evento (sin doble reversión, queda en historial
-  como DESHECHO), canje directo, solicitudes pendientes, stock con steppers
-  −/+, empresa / logo, tema y temporada.
+  como DESHECHO), canje directo con **cantidad** (1, 2, 3…: costo total =
+  cantidad × costo, stock baja por cantidad), solicitudes pendientes,
+  stock con steppers −/+, empresa / logo, tema y temporada.
+- **Sub-saldo de puntualidad** — cada colaborador tiene, además de sus
+  puntos totales, sus puntos de puntualidad: solo lo ganado con check-in
+  puntual, semana sin faltas y mes perfecto. Retardo y Falta injustificada
+  también restan de ahí. El **BONO DE PUNTUALIDAD** (500 pts, stock 100)
+  solo se canjea con ese sub-saldo: si pide 3 bonos y solo tiene 1,000 pts
+  de puntualidad, el Master muestra `NO CUMPLES CON LOS REQUERIMIENTOS
+  PARA CANJEAR 3 BONOS, solo cuentas con 1000 puntos que sí puedes canjear
+  por BONOS.` Al canjear se descuenta de los dos saldos; si no lo canjea,
+  esos puntos se quedan y siguen acumulando para un premio mayor. Un premio
+  general descuenta primero los puntos que no son de puntualidad.
 - **Merlín** — mago barbón, comunicados con bono ×2 o ×3 en todas las acciones
   o en una sola. Activo: `MERLIN A HABLADO | PUNTOS DOBLES`, ×2 en Check-in.
 - **Cuervo de RRHH · Corvo** — recuadro aparte de Merlín. Cuervo negro pixel
@@ -30,7 +41,8 @@ nivel Novato, empatados.
   personalizada con motivo. Saldo nunca < 0.
 - **Premios + stock:** Amazon 500 pts / 4, Cinépolis 700 / 5, Videojuego
   900 / 3, Tablet Samsung A11+ 1400 / 2, TV TCL 50" 2000 / 1,
-  PS5 100000 / 1 — Premio Mayor dorado dinámico (el más caro).
+  PS5 100000 / 1 — Premio Mayor dorado dinámico (el más caro),
+  BONO DE PUNTUALIDAD 500 / 100 (solo con puntos de puntualidad).
 - **Tema / temporada actual:** Bosque + Navidad (nieve, pinos con luces,
   Merlín con gorro de Santa y trineo).
 
@@ -61,13 +73,33 @@ En Supabase > SQL Editor, pega y ejecuta:
 
 ```
 supabase/migrations/0001_init.sql
+supabase/migrations/0002_add_area.sql
+supabase/migrations/0003_add_punctuality_points.sql
 ```
 
 Ese archivo crea: `collaborators`, `action_types`, `penalty_types`,
 `point_events`, `prizes`, `redemptions`, `announcements` (Merlín),
 `crow_announcements` (Corvo), `settings`, habilita RLS y Realtime,
-y siembra los 3 participantes en 0, los 6 premios con stock, el comunicado
-de Merlín y los 4 de Corvo (el primero activo, sin bono).
+y siembra los 3 participantes en 0, los 7 premios con stock (incluido el
+BONO DE PUNTUALIDAD), el comunicado de Merlín y los 4 de Corvo (el primero
+activo, sin bono). Para una instalación nueva, corre 0001, luego 0002 y
+luego 0003, en ese orden.
+
+## Migración 0003 — sub-saldo de puntualidad (base ya creada)
+
+Si tu base ya existe (la real, con puntos), en Supabase > SQL Editor
+pega y ejecuta **antes** de hacer Redeploy en Vercel:
+
+```
+supabase/migrations/0003_add_punctuality_points.sql
+```
+
+Agrega `collaborators.punctuality_points` y `redemptions.quantity`,
+crea el premio BONO DE PUNTUALIDAD (500 pts, stock 100) si no existe, y
+reconstruye el sub-saldo de cada colaborador desde su historial
+(check-in puntual y semana sin faltas, menos Retardo y Falta
+injustificada, sin pasar del saldo total). Sin correrla, el Master nuevo
+falla al sumar, restar o canjear. Volver a correrla es seguro.
 
 ## Proteger el Master con PIN
 
@@ -118,6 +150,8 @@ src/lib/types.ts            Tipos (sin lifetime)
 src/lib/supabase.ts         Cliente Supabase (anon + admin)
 src/lib/actions.ts          Server actions: sumar, restar, canjear, deshacer
 supabase/migrations/0001_init.sql
+supabase/migrations/0002_add_area.sql
+supabase/migrations/0003_add_punctuality_points.sql
 ```
 
 ## Pruebas de aceptación
@@ -126,6 +160,10 @@ supabase/migrations/0001_init.sql
 2. En `/master`, sumar Venta 100 a Fany: sube a 100, Bronce, y se refleja en `/` en <5 s.
 3. Activar bono ×2 de Merlín en Check-in y sumar Check-in: +20, historial dice de quién fue.
 4. Canjear Amazon con 500 pts: descuenta 500 y stock 4 → 3.
+   Canjear 2× BONO DE PUNTUALIDAD con 1,000 pts de puntualidad: descuenta
+   1,000 del total y 1,000 de puntualidad, stock 100 → 98, y en Canjes
+   realizados se ve "canjeó 2x BONO DE PUNTUALIDAD". Pedir 3 bonos con
+   1,000 pts de puntualidad muestra el NO CUMPLES y no descuenta nada.
 5. Deshacer ese canje: devuelve puntos y stock, y el evento queda DESHECHO; segundo Deshacer se rechaza.
 6. Cambiar temporada a Halloween: Merlín y Corvo cambian de gorro, sin nieve.
 7. PIN: abrir `/master` sin sesión redirige a `/master-login`; PIN

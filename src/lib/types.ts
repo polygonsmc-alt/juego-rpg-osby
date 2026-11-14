@@ -6,6 +6,11 @@ export interface Collaborator {
   name: string;
   sprite: number; // 0-11
   points: number; // SOLO numero: puntos actuales
+  // Sub-saldo de puntualidad: parte de `points` que se ganó solo con
+  // acciones de puntualidad (check-in puntual, semana sin faltas,
+  // mes perfecto). Sirve solo para canjear el BONO DE PUNTUALIDAD:
+  // 500 pts de puntualidad = 1 bono. Nunca pasa de `points` ni baja de 0.
+  punctuality_points: number;
   area: string | null; // Área/departamento (ej. Ventas) — null = sin área todavía
   created_at?: string;
 }
@@ -46,7 +51,8 @@ export interface Redemption {
   collaborator_id: number;
   prize_id: number;
   prize_name: string;
-  cost: number;
+  cost: number; // costo TOTAL: cantidad x costo unitario del premio
+  quantity: number; // cuántas unidades se canjearon en este canje (1 = como antes)
   status: "approved" | "pending" | "rejected";
   created_at: string;
   resolved_at?: string | null;

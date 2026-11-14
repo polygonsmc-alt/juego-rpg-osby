@@ -44,6 +44,49 @@ export const PENALTIES: PenaltyType[] = [
   { id: 4, label: "No reportar avance / falta de comunicación", points: -10 },
 ];
 
+export const PUNCTUALITY_PRIZE_NAME = "BONO DE PUNTUALIDAD";
+export const PUNCTUALITY_PRIZE_COST = 500; // 500 pts de puntualidad = 1 bono ($500)
+
+// --- Sub-saldo de puntualidad ---
+// Qué acciones suman a punctuality_points (además de al saldo total):
+// solo las de puntualidad. Se detectan por NOMBRE (así, si Osbed agrega
+// desde ACCIONES Y PUNTOS una acción llamada "Mes perfecto...", también
+// suma) y, por si se renombra una acción del seed, por su id del seed:
+// 3 = Semana sin faltas ni retardos, 12 = Check-in puntual.
+// NO se inventan otras: ventas, leads y entregas suman solo al total.
+export const PUNCTUALITY_ACTION_IDS = [3, 12];
+function normLabel(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[-_]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+export function isPunctualityAction(actionId: number | null, label: string): boolean {
+  if (actionId != null && PUNCTUALITY_ACTION_IDS.includes(actionId)) return true;
+  const n = normLabel(label);
+  return n.includes("check in puntual") || n.includes("semana sin faltas") || n.includes("mes perfecto");
+}
+// Qué faltas restan de punctuality_points (además de del saldo total):
+// Retardo y Falta injustificada. "No reportar avance / falta de
+// comunicación" NO es de puntualidad, por eso se pide el texto exacto
+// "falta injustificada" y no solo "falta".
+export function isPunctualityPenalty(label: string): boolean {
+  const n = normLabel(label);
+  return n.includes("retardo") || n.includes("falta injustificada");
+}
+// Un premio es "solo de puntualidad" si su nombre habla de puntualidad
+// (el BONO DE PUNTUALIDAD). Solo se canjea con puntos de puntualidad.
+export function isPunctualityPrize(prizeName: string): boolean {
+  return normLabel(prizeName).includes("puntualidad");
+}
+// Cuántos bonos de puntualidad alcanza a canjear con su sub-saldo.
+export function punctualityBonusesAvailable(punctualityPoints: number, cost: number = PUNCTUALITY_PRIZE_COST): number {
+  return Math.max(0, Math.floor((punctualityPoints || 0) / cost));
+}
+
 export const PRIZES_SEED: Prize[] = [
   { id: 1, name: "GIFT CARD 500MXN AMAZON", cost: 500, stock: 4 },
   { id: 2, name: "GIFT CARD 500MXN CINEPOLIS", cost: 700, stock: 5 },
@@ -51,6 +94,7 @@ export const PRIZES_SEED: Prize[] = [
   { id: 4, name: "TABLET SAMSUNG A11+", cost: 1400, stock: 2 },
   { id: 5, name: "TV 50 PULGADAS TCL", cost: 2000, stock: 1 },
   { id: 6, name: "CONSOLA SONY PS5 (STANDARD)", cost: 100000, stock: 1 },
+  { id: 7, name: PUNCTUALITY_PRIZE_NAME, cost: PUNCTUALITY_PRIZE_COST, stock: 100 },
 ];
 
 export function premioMayor(prizes: Prize[]): Prize | null {
@@ -59,9 +103,9 @@ export function premioMayor(prizes: Prize[]): Prize | null {
 }
 
 export const COLLABORATORS_SEED: Collaborator[] = [
-  { id: 1, name: "FANY MOTA", sprite: 2, points: 0, area: "Marketing" },
-  { id: 2, name: "OSBED", sprite: 0, points: 0, area: "Diseño gráfico" },
-  { id: 3, name: "mayra morua", sprite: 10, points: 0, area: "Marketing" },
+  { id: 1, name: "FANY MOTA", sprite: 2, points: 0, punctuality_points: 0, area: "Marketing" },
+  { id: 2, name: "OSBED", sprite: 0, points: 0, punctuality_points: 0, area: "Diseño gráfico" },
+  { id: 3, name: "mayra morua", sprite: 10, points: 0, punctuality_points: 0, area: "Marketing" },
 ];
 
 export const MERLIN_SEED: Announcement[] = [

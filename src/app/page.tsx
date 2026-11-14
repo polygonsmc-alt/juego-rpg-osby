@@ -50,7 +50,7 @@ export default function LaCarrera() {
       supabase.from("settings").select("*").eq("id", 1).single(),
     ]);
     setState((prev) => ({
-      collaborators: ((c.data as Collaborator[]) || prev.collaborators).map((x) => ({ ...x, area: x.area ?? null })),
+      collaborators: ((c.data as Collaborator[]) || prev.collaborators).map((x) => ({ ...x, punctuality_points: (x as Collaborator).punctuality_points ?? 0, area: x.area ?? null })),
       action_types: (at.data as GameState["action_types"])?.length ? (at.data as GameState["action_types"]) : prev.action_types,
       penalty_types: prev.penalty_types, // La Carrera no muestra faltas; se conserva el seed
       prizes: p.data || prev.prizes,
@@ -137,7 +137,7 @@ export default function LaCarrera() {
                     <li key={r.id} className="rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2.5 text-sm">
                       <span className="font-bold text-[var(--text)]">{who?.name ?? "Alguien"}</span>{" "}
                       <span className="text-[var(--dim)]">canjeó</span>{" "}
-                      <span className="font-bold text-[var(--text)]">{r.prize_name}</span>{" "}
+                      <span className="font-bold text-[var(--text)]">{Math.max(1, Math.trunc(Number((r as { quantity?: number }).quantity ?? 1))) > 1 ? `${Math.max(1, Math.trunc(Number((r as { quantity?: number }).quantity ?? 1)))}x ${r.prize_name}` : r.prize_name}</span>{" "}
                       <span className="text-[var(--dim)]">({fmt(r.cost)} pts)</span>
                       <span className="block text-xs text-[var(--dim)]">{new Date(r.resolved_at ?? r.created_at).toLocaleString("es-MX")}</span>
                     </li>

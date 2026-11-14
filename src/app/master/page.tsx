@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { ACTIONS, PENALTIES, COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, THEMES, AVATAR_NAMES, levelFor } from "@/lib/data";
+import { ACTIONS, PENALTIES, COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, THEMES, AVATAR_NAMES, levelFor, isPunctualityAction, isPunctualityPenalty, isPunctualityPrize, punctualityBonusesAvailable, PUNCTUALITY_PRIZE_COST } from "@/lib/data";
 import type { GameState, Collaborator, PointEvent, ActionType, PenaltyType } from "@/lib/types";
 import { awardPoints, deductPoints, directRedeem, undoEvent, testConnection, resolveRedemption, addPrize, updatePrize, removePrize, publishAnnouncement, toggleAnnouncementAction, deleteAnnouncementAction, saveCompanyAction, saveAppearanceAction, addActionType, updateActionType, removeActionType, addCollaborator, updateCollaborator, removeCollaborator, addPenaltyType, updatePenaltyType, removePenaltyType, setCompanyLogo, removeCompanyLogo } from "@/lib/actions";
 import { logoutPin } from "@/lib/auth";
@@ -101,6 +101,7 @@ export default function Master() {
   const [customReason, setCustomReason] = useState("");
   const [directCollabId, setDirectCollabId] = useState(1);
   const [prizeId, setPrizeId] = useState(1);
+  const [directQty, setDirectQty] = useState(1); // Cantidad a canjear (1 = como antes, de uno por uno)
   const [directConfirm, setDirectConfirm] = useState(false);
   const [directMsg, setDirectMsg] = useState<string | null>(null);
   const [undoConfirmId, setUndoConfirmId] = useState<number | null>(null);
@@ -150,6 +151,9 @@ export default function Master() {
   const [newPenaltyPoints, setNewPenaltyPoints] = useState("");
 
   function humanError(e?: string) {
+    // Mensajes que ya vienen redactados desde el servidor (validación de
+    // canje): se muestran tal cual, sin el prefijo "Error:".
+    if (e && (e.startsWith("NO CUMPLES") || e.startsWith("Solo quedan") || e.startsWith("No le alcanzan los puntos"))) return e;
     switch (e) {
       case "no_autorizado":
         return "No autorizado — vuelve a entrar con el PIN del Master.";
@@ -161,8 +165,14 @@ export default function Master() {
         return "Supabase no conectado en Vercel — los botones no guardan puntos. Ve a Vercel > Settings > Environment Variables, pon las 3 llaves y haz Redeploy.";
       case "out_of_stock":
         return "Ese premio está AGOTADO, ya no quedan unidades. Sube su inventario en la sección PREMIOS si tienes más.";
+      case "stock_insuficiente":
+        return "No hay suficientes unidades de ese premio para esa cantidad. Baja la cantidad o sube el inventario en la sección PREMIOS.";
       case "insufficient_points":
         return "No le alcanzan los puntos para ese premio.";
+      case "punctuality_insufficient":
+        return "No le alcanzan los puntos de puntualidad para esos bonos.";
+      case "cantidad_invalida":
+        return "La cantidad a canjear debe ser 1 o más.";
       case "already_reversed":
         return "Ese movimiento ya se había deshecho antes.";
       case "is_reversal_record":
@@ -200,7 +210,7 @@ export default function Master() {
       const err = [c, at, pt, p, e, r, a, ca, s].find((x) => x.error)?.error;
       if (err) { showMsg("err", `Error al cargar desde Supabase: ${err.message}`); return; }
       setState((prev) => ({
-        collaborators: ((c.data as Collaborator[]) || prev.collaborators).map((x) => ({ ...x, area: x.area ?? null })),
+        collaborators: ((c.data as Collaborator[]) || prev.collaborators).map((x) => ({ ...x, punctuality_points: (x as Collaborator).punctuality_points ?? 0, area: x.area ?? null })),
         action_types: (at.data as ActionType[])?.length ? (at.data as ActionType[]) : prev.action_types,
         penalty_types: (pt.data as PenaltyType[])?.length ? (pt.data as PenaltyType[]) : prev.penalty_types,
         prizes: p.data || prev.prizes,
@@ -222,9 +232,19 @@ export default function Master() {
   const penaltyTarget = state.collaborators.find((c) => c.id === penaltyCollabId) || state.collaborators[0];
   const directParticipant = state.collaborators.find((c) => c.id === directCollabId) || state.collaborators[0];
   const directPrize = state.prizes.find((p) => p.id === prizeId) || state.prizes[0];
-  const directAffords = directParticipant && directPrize ? directParticipant.points >= directPrize.cost : false;
-  const directInStock = directPrize ? directPrize.stock > 0 : false;
-  const directCanRedeem = directAffords && directInStock;
+  // Canje directo por cantidad: costo total = cantidad x costo unitario.
+  // El BONO DE PUNTUALIDAD solo se paga con el sub-saldo de puntualidad.
+  const directQtySafe = Math.max(1, Math.trunc(Number(directQty) || 1));
+  const directTotalCost = directPrize ? directPrize.cost * directQtySafe : 0;
+  const directIsPunctuality = directPrize ? isPunctualityPrize(directPrize.name) : false;
+  const directPunctuality = directParticipant?.punctuality_points ?? 0;
+  const directBonusesAvailable = punctualityBonusesAvailable(directPunctuality, directPrize?.cost ?? PUNCTUALITY_PRIZE_COST);
+  const directAffords = directParticipant && directPrize ? directParticipant.points >= directTotalCost : false;
+  const directPunctualityAffords = !directIsPunctuality || directPunctuality >= directTotalCost;
+  const directInStock = directPrize ? directPrize.stock >= directQtySafe : false;
+  // Nota: el botón de canjear NO se deshabilita cuando no alcanza: al
+  // confirmar, el servidor valida y muestra el mensaje exacto (por
+  // ejemplo, el NO CUMPLES de los bonos de puntualidad).
   const pendingRedemptions = state.redemptions.filter((r) => r.status === "pending");
   const resolvedRedemptions = state.redemptions.filter((r) => r.status !== "pending");
   // Catálogo de acciones cargado de Supabase (action_types); en modo ejemplo
@@ -260,7 +280,7 @@ export default function Master() {
     setBusy(true);
     try {
       const res = await awardPoints(collab.id, a.id, a.label, a.points);
-      if (res.ok) showMsg("ok", `+${fmt(res.points)} pts para ${collab.name}: ${a.label}${res.bonus_from ? ` (bono × de ${res.bonus_from})` : ""} — nuevo saldo: ${fmt(res.newPoints)} pts`);
+      if (res.ok) showMsg("ok", `+${fmt(res.points)} pts para ${collab.name}: ${a.label}${res.bonus_from ? ` (bono × de ${res.bonus_from})` : ""} — nuevo saldo: ${fmt(res.newPoints)} pts${res.punctualityDelta > 0 ? ` · Puntualidad: ${fmt(res.newPunctualityPoints)} pts` : ""}`);
       else showMsg("err", humanError(res.error));
     } catch (e) {
       showMsg("err", `Error al sumar puntos: ${e instanceof Error ? e.message : String(e)}`);
@@ -284,7 +304,7 @@ export default function Master() {
     setBusy(true);
     try {
       const res = await deductPoints(penaltyTarget.id, p.label, p.points);
-      if (res.ok) showMsg("ok", `−${fmt(Math.abs(p.points))} pts a ${penaltyTarget.name}: ${p.label} — nuevo saldo: ${fmt(res.newPoints)} pts (el saldo nunca baja de 0)`);
+      if (res.ok) showMsg("ok", `−${fmt(Math.abs(p.points))} pts a ${penaltyTarget.name}: ${p.label} — nuevo saldo: ${fmt(res.newPoints)} pts (el saldo nunca baja de 0)${isPunctualityPenalty(p.label) ? ` · Puntualidad: ${fmt(res.newPunctualityPoints)} pts` : ""}`);
       else showMsg("err", humanError(res.error));
     } catch (e) {
       showMsg("err", `Error al restar puntos: ${e instanceof Error ? e.message : String(e)}`);
@@ -323,10 +343,10 @@ export default function Master() {
     if (!directParticipant || !directPrize) return;
     setBusy(true);
     try {
-      const res = await directRedeem(directParticipant.id, directPrize.id);
+      const res = await directRedeem(directParticipant.id, directPrize.id, directQtySafe);
       setDirectConfirm(false);
-      if (res.ok) setDirectMsg(`Canje registrado: ${directParticipant.name} canjeó «${directPrize.name}» y se le descontaron ${fmt(directPrize.cost)} pts. El inventario de ese premio bajó a ${fmt(Math.max(0, directPrize.stock - 1))} disponible${directPrize.stock - 1 === 1 ? "" : "s"}${directPrize.stock - 1 <= 0 ? " (AGOTADO)" : ""}. Ya se ve en La Carrera como objeto canjeado y en el recuadro de Canjes realizados.`);
-      else setDirectMsg(humanError(res.error));
+      if (res.ok) setDirectMsg(`Canje registrado: ${directParticipant.name} canjeó ${res.quantity > 1 ? `${res.quantity}x «${directPrize.name}»` : `«${directPrize.name}»`} y se le descontaron ${fmt(res.totalCost)} pts${res.punctualityUsed > 0 ? ` (${fmt(res.punctualityUsed)} de puntualidad)` : ""}. Quedó con ${fmt(res.newPoints)} pts · Puntualidad: ${fmt(res.newPunctualityPoints)} pts. El inventario de ese premio bajó a ${fmt(Math.max(0, directPrize.stock - res.quantity))} disponible${directPrize.stock - res.quantity === 1 ? "" : "s"}${directPrize.stock - res.quantity <= 0 ? " (AGOTADO)" : ""}. Ya se ve en La Carrera como objeto canjeado y en el recuadro de Canjes realizados.`);
+      else setDirectMsg("message" in res && res.message ? res.message : humanError(res.error));
     } catch (e) {
       setDirectConfirm(false);
       setDirectMsg(`No se pudo registrar el canje. Revisa tu conexión e inténtalo de nuevo. (${e instanceof Error ? e.message : String(e)})`);
@@ -337,8 +357,9 @@ export default function Master() {
     try {
       const res = await resolveRedemption(id, approve);
       const req = state.redemptions.find((r) => r.id === id);
-      if (!res.ok) setDirectMsg(humanError(res.error));
-      else if (res.approved) setDirectMsg(req ? `Canje aprobado: se descontaron ${fmt(req.cost)} pts a ${nameOf(req.collaborator_id)} por «${req.prize_name}» y quedó registrado en el historial.` : "Canje aprobado y puntos descontados.");
+      const reqQty = Math.max(1, Math.trunc(Number(req?.quantity ?? 1)));
+      if (!res.ok) setDirectMsg("message" in res && res.message ? res.message : humanError(res.error));
+      else if (res.approved) setDirectMsg(req ? `Canje aprobado: se descontaron ${fmt(req.cost)} pts a ${nameOf(req.collaborator_id)} por ${reqQty > 1 ? `${reqQty}x «${req.prize_name}»` : `«${req.prize_name}»`} y quedó registrado en el historial.` : "Canje aprobado y puntos descontados.");
       else setDirectMsg(req ? `Solicitud rechazada: ${nameOf(req.collaborator_id)} pidió «${req.prize_name}» y no se descontó ningún punto. Quedó registrada como rechazada.` : "Solicitud rechazada. No se descontó ningún punto.");
     } catch (e) {
       setDirectMsg(`No se pudo resolver la solicitud. Revisa tu conexión e inténtalo de nuevo. (${e instanceof Error ? e.message : String(e)})`);
@@ -707,7 +728,7 @@ export default function Master() {
             <input aria-label="Motivo del ajuste" type="text" placeholder="Motivo (ej. Bonus del mes)" className={`${inputCls} flex-1`} value={customAwardLabel} onChange={(e) => setCustomAwardLabel(e.target.value)} />
             <button type="submit" className={btnPrimary} disabled={busy}>APLICAR</button>
           </form>
-          {collab && <div className="mt-3 flex items-center gap-2"><PixelAvatar sprite={collab.sprite} points={collab.points} size={40} /><span>{collab.name} — {collab.points} pts</span></div>}
+          {collab && <div className="mt-3 flex items-center gap-2"><PixelAvatar sprite={collab.sprite} points={collab.points} size={40} /><span>{collab.name} — {collab.points} pts · Puntualidad: {fmt(collab.punctuality_points ?? 0)} pts</span></div>}
         </section>
 
         {/* Colaboradores — como el Master: agregar, editar y eliminar colaboradores con su monito */}
@@ -742,7 +763,7 @@ export default function Master() {
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-bold text-[var(--text)]">{p.name}</p>
                         {p.area && <p className="truncate text-xs text-[var(--dim)]">Área: {p.area}</p>}
-                        <p className="text-xs text-[var(--dim)]">{fmt(p.points)} pts · {levelFor(p.points)}</p>
+                        <p className="text-xs text-[var(--dim)]">{fmt(p.points)} pts · {levelFor(p.points)} · Puntualidad: {fmt(p.punctuality_points ?? 0)} pts</p>
                       </div>
                       <TierBadge points={p.points} />
                       <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar a ${p.name}`} onClick={() => { setEditingCollab(p.id); setEditCollabName(p.name); setEditCollabSprite(p.sprite); setEditCollabArea(p.area ?? ""); setConfirmDeleteCollab(null); }}>Editar</button>
@@ -763,7 +784,7 @@ export default function Master() {
         {/* Acciones y puntos — como el Master: editar, agregar y eliminar acciones */}
         <section aria-label="Acciones que dan puntos" className="panel p-4 sm:p-5">
           <h2 className="font-pixel text-sm text-[var(--text)]">ACCIONES Y PUNTOS</h2>
-          <p className="mt-2 text-sm text-[var(--dim)]">Estas son las acciones que aparecen en SUMAR PUNTOS. Si cambias los puntos de una acción, el botón de SUMAR PUNTOS ya suma el valor nuevo.</p>
+          <p className="mt-2 text-sm text-[var(--dim)]">Estas son las acciones que aparecen en SUMAR PUNTOS. Si cambias los puntos de una acción, el botón de SUMAR PUNTOS ya suma el valor nuevo. Las marcadas <strong className="text-[var(--text)]">PUNTUALIDAD</strong> también suman al sub-saldo de puntualidad del colaborador (check-in puntual, semana sin faltas y mes perfecto): solo con ese sub-saldo se canjea el BONO DE PUNTUALIDAD.</p>
           <ul className="mt-3 flex flex-col divide-y divide-[var(--border)]">
             {actions.map((a) => (
               <li key={a.id} className="py-2.5">
@@ -777,6 +798,7 @@ export default function Master() {
                 ) : (
                   <div className="flex items-center gap-3">
                     <p className="min-w-0 flex-1 text-sm text-[var(--text)]">{a.label}</p>
+                    {isPunctualityAction(a.id, a.label) && <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>PUNTUALIDAD</span>}
                     <span className="font-pixel shrink-0 text-[11px] text-[var(--green)]">+{fmt(a.points)}</span>
                     <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar acción ${a.label}`} onClick={() => { setEditingAction(a.id); setEditActionName(a.label); setEditActionPoints(String(a.points)); }}>Editar</button>
                     <button type="button" className={btnDanger} disabled={busy} aria-label={`Eliminar acción ${a.label}`} onClick={() => doRemoveAction(a.id, a.label)}>Eliminar</button>
@@ -795,7 +817,7 @@ export default function Master() {
         {/* Faltas y castigos — como el Master: editar, agregar y eliminar faltas */}
         <section aria-label="Faltas que restan puntos" className="panel p-4 sm:p-5">
           <h2 className="font-pixel text-sm text-[var(--text)]">FALTAS Y CASTIGOS</h2>
-          <p className="mt-2 text-sm text-[var(--dim)]">Estas son las faltas que aparecen en RESTAR PUNTOS. Los puntos se escriben en positivo y se restan: si cambias una falta a 20, el botón de RESTAR PUNTOS quita 20.</p>
+          <p className="mt-2 text-sm text-[var(--dim)]">Estas son las faltas que aparecen en RESTAR PUNTOS. Los puntos se escriben en positivo y se restan: si cambias una falta a 20, el botón de RESTAR PUNTOS quita 20. Las marcadas <strong className="text-[var(--text)]">PUNTUALIDAD</strong> (Retardo y Falta injustificada) también restan del sub-saldo de puntualidad.</p>
           <ul className="mt-3 flex flex-col divide-y divide-[var(--border)]">
             {penalties.map((pen) => (
               <li key={pen.id} className="py-2.5">
@@ -809,6 +831,7 @@ export default function Master() {
                 ) : (
                   <div className="flex items-center gap-3">
                     <p className="min-w-0 flex-1 text-sm text-[var(--text)]">{pen.label}</p>
+                    {isPunctualityPenalty(pen.label) && <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--red)", borderColor: "var(--red)" }}>PUNTUALIDAD</span>}
                     <span className="font-pixel shrink-0 text-[11px]" style={{ color: "var(--red)" }}>−{fmt(Math.abs(pen.points))}</span>
                     <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar falta ${pen.label}`} onClick={() => { setEditingPenalty(pen.id); setEditPenaltyName(pen.label); setEditPenaltyPoints(String(Math.abs(pen.points))); }}>Editar</button>
                     <button type="button" className={btnDanger} disabled={busy} aria-label={`Eliminar falta ${pen.label}`} onClick={() => doRemovePenalty(pen.id, pen.label)}>Eliminar</button>
@@ -896,12 +919,12 @@ export default function Master() {
           <p className="mt-2 text-sm text-[var(--dim)]">La Carrera ya es solo visual: los colaboradores no tocan nada, piden su premio en persona con <strong className="text-[var(--text)]">RRHH</strong> y <strong className="text-[var(--text)]">solo tú, el Master, registras el canje aquí</strong>. Usa el canje directo de abajo (seleccionas quién y qué premio, y se descuentan los puntos al confirmar) o aprueba una solicitud pendiente anterior. Al canjear, en La Carrera ese premio se marca «Te lo ganaron · Objeto canjeado» y el canje aparece arriba en el recuadro de Canjes realizados.</p>
           <div className="mt-4 rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] px-3 py-3 sm:px-4">
             <h3 className="font-pixel text-xs text-[var(--text)]">CANJE DIRECTO · SOLO MASTER</h3>
-            <p className="mt-1.5 text-sm text-[var(--dim)]">El colaborador te pidió el premio en RRHH / en persona. Selecciónalo aquí junto con el premio: al confirmar se le descuentan los puntos y queda registrado como canjeado.</p>
+            <p className="mt-1.5 text-sm text-[var(--dim)]">El colaborador te pidió el premio en RRHH / en persona. Selecciónalo aquí junto con el premio y <strong className="text-[var(--text)]">cuántos quiere canjear</strong>: al confirmar se le descuentan los puntos y queda registrado como canjeado. El BONO DE PUNTUALIDAD solo se paga con puntos de puntualidad, no con puntos de ventas.</p>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <div>
                 <label htmlFor="direct-participant" className="block text-sm font-semibold text-[var(--text)]">¿Quién canjea?</label>
                 <select id="direct-participant" aria-label="Colaborador que canjea el premio" className={`${inputCls} mt-1 w-full`} value={directParticipant?.id ?? ""} onChange={(e) => { setDirectCollabId(Number(e.target.value)); setDirectConfirm(false); setDirectMsg(null); }}>
-                  {state.collaborators.map((p) => <option key={p.id} value={p.id}>{p.name} — {fmt(p.points)} pts</option>)}
+                  {state.collaborators.map((p) => <option key={p.id} value={p.id}>{p.name} — {fmt(p.points)} pts · Puntualidad: {fmt(p.punctuality_points ?? 0)} pts</option>)}
                 </select>
               </div>
               <div>
@@ -911,24 +934,39 @@ export default function Master() {
                 </select>
               </div>
             </div>
+            <div className="mt-3">
+              <label htmlFor="direct-qty" className="block text-sm font-semibold text-[var(--text)]">¿Cuántos desea canjear?</label>
+              <div className="mt-1 flex items-center gap-2">
+                <button type="button" className="flex h-10 w-10 items-center justify-center rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] text-lg font-bold text-[var(--text)] disabled:opacity-40" disabled={directQtySafe <= 1 || busy} aria-label="Quitar una unidad" onClick={() => { setDirectQty((q) => Math.max(1, Math.trunc(Number(q) || 1) - 1)); setDirectConfirm(false); setDirectMsg(null); }}>−</button>
+                <input id="direct-qty" aria-label="Cantidad a canjear" type="number" inputMode="numeric" min={1} className={`${inputCls} w-24 text-center`} value={directQty} onChange={(e) => { setDirectQty(Math.max(1, Math.trunc(Number(e.target.value) || 1))); setDirectConfirm(false); setDirectMsg(null); }} />
+                <button type="button" className="flex h-10 w-10 items-center justify-center rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] text-lg font-bold text-[var(--text)] disabled:opacity-40" disabled={busy} aria-label="Agregar una unidad" onClick={() => { setDirectQty((q) => Math.max(1, Math.trunc(Number(q) || 1) + 1)); setDirectConfirm(false); setDirectMsg(null); }}>+</button>
+                <span className="text-sm text-[var(--dim)]">Total: <strong className="text-[var(--text)]">{directPrize ? fmt(directTotalCost) : "—"} pts</strong>{directPrize ? ` (${directQtySafe} × ${fmt(directPrize.cost)} pts)` : ""}</span>
+              </div>
+            </div>
             {directParticipant && directPrize && (
-              <p className="mt-2 text-sm text-[var(--text)]">
+              <div className="mt-2 text-sm text-[var(--text)]">
+                <p>
+                  {directParticipant.name} tiene {fmt(directParticipant.points)} pts en total y {fmt(directPunctuality)} pts de puntualidad
+                  {directIsPunctuality ? ` — le alcanzan para ${fmt(directBonusesAvailable)} bono${directBonusesAvailable === 1 ? "" : "s"} de puntualidad` : ""}.
+                </p>
                 {!directInStock ? (
-                  <span className="font-bold" style={{ color: "var(--red)" }}>AGOTADO: no quedan unidades de «{directPrize.name}», así que no se puede canjear. Sube su inventario en la sección PREMIOS si tienes más.</span>
-                ) : directAffords ? (
-                  <>A {directParticipant.name} le alcanzan: tiene {fmt(directParticipant.points)} pts y el premio cuesta {fmt(directPrize.cost)} pts. Quedaría con {fmt(directParticipant.points - directPrize.cost)} pts y el premio quedaría con {fmt(directPrize.stock - 1)} disponible{directPrize.stock - 1 === 1 ? "" : "s"}.</>
+                  <p className="mt-1 font-bold" style={{ color: "var(--red)" }}>Solo quedan {fmt(directPrize.stock)} unidades de «{directPrize.name}», no se pueden canjear {directQtySafe}. Sube su inventario en la sección PREMIOS si tienes más.</p>
+                ) : directIsPunctuality && !directPunctualityAffords ? (
+                  <p className="mt-1 font-bold" style={{ color: "var(--red)" }}>NO CUMPLES CON LOS REQUERIMIENTOS PARA CANJEAR {directQtySafe} BONOS, solo cuentas con {directPunctuality} puntos que sí puedes canjear por BONOS.</p>
+                ) : !directAffords ? (
+                  <p className="mt-1 font-bold" style={{ color: "var(--red)" }}>A {directParticipant.name} no le alcanzan: tiene {fmt(directParticipant.points)} pts y {directQtySafe} × «{directPrize.name}» cuestan {fmt(directTotalCost)} pts.</p>
                 ) : (
-                  <span className="font-bold" style={{ color: "var(--red)" }}>A {directParticipant.name} no le alcanzan: tiene {fmt(directParticipant.points)} pts y el premio cuesta {fmt(directPrize.cost)} pts.</span>
+                  <p className="mt-1">Quedaría con {fmt(directParticipant.points - directTotalCost)} pts{directIsPunctuality ? ` · Puntualidad: ${fmt(directPunctuality - directTotalCost)} pts` : ""} y el premio quedaría con {fmt(directPrize.stock - directQtySafe)} disponible{directPrize.stock - directQtySafe === 1 ? "" : "s"}.</p>
                 )}
-              </p>
+              </div>
             )}
             {directConfirm ? (
               <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <button type="button" className={btnPrimary} disabled={busy} onClick={doRedeem}>{busy ? "CANJEANDO…" : "SÍ, CANJEAR Y DESCONTAR"}</button>
+                <button type="button" className={btnPrimary} disabled={busy} onClick={doRedeem}>{busy ? "CANJEANDO…" : `SÍ, CANJEAR ${directQtySafe > 1 ? `${directQtySafe} × ` : ""}Y DESCONTAR`}</button>
                 <button type="button" className="min-h-11 rounded-md border-2 border-[var(--border)] px-4 py-2 text-sm font-bold text-[var(--dim)]" onClick={() => setDirectConfirm(false)}>Cancelar</button>
               </div>
             ) : (
-              <button type="button" className={`${btnPrimary} mt-3`} disabled={!directCanRedeem || busy} onClick={() => { setDirectMsg(null); setDirectConfirm(true); }}>REGISTRAR CANJE Y DESCONTAR</button>
+              <button type="button" className={`${btnPrimary} mt-3`} disabled={!directParticipant || !directPrize || busy} onClick={() => { setDirectMsg(null); setDirectConfirm(true); }}>REGISTRAR CANJE Y DESCONTAR</button>
             )}
             {directMsg && <p role="status" className="mt-3 rounded-md border-2 border-[var(--green)] bg-[var(--surface)] px-3 py-2 text-sm font-semibold text-[var(--text)]">{directMsg}</p>}
           </div>
@@ -947,7 +985,7 @@ export default function Master() {
                     <div className="flex items-start gap-3">
                       {requester && <PixelAvatar sprite={requester.sprite} points={requester.points} size={40} />}
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm text-[var(--text)]"><span className="font-bold">{r.prize_name ? nameOf(r.collaborator_id) : ""}</span> solicitó <span className="font-bold">{r.prize_name}</span></p>
+                        <p className="text-sm text-[var(--text)]"><span className="font-bold">{r.prize_name ? nameOf(r.collaborator_id) : ""}</span> solicitó <span className="font-bold">{Math.max(1, Math.trunc(Number((r as { quantity?: number }).quantity ?? 1))) > 1 ? `${Math.max(1, Math.trunc(Number((r as { quantity?: number }).quantity ?? 1)))}x ${r.prize_name}` : r.prize_name}</span></p>
                         <dl className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-[var(--dim)] sm:grid-cols-4">
                           <div><dt className="font-semibold">Costo</dt><dd className="font-pixel mt-0.5 text-[11px] text-[var(--accent)]">{fmt(r.cost)} PTS</dd></div>
                           <div><dt className="font-semibold">Saldo actual</dt><dd className="font-pixel mt-0.5 text-[11px] text-[var(--text)]">{fmt(liveBalance)} PTS</dd></div>
@@ -976,7 +1014,7 @@ export default function Master() {
                   <li key={r.id} className="flex items-center gap-3 py-2.5 text-sm">
                     <div className="min-w-0 flex-1">
                       <span className="font-semibold text-[var(--text)]">{nameOf(r.collaborator_id)}</span>{" "}
-                      <span className="text-[var(--dim)]">solicitó {r.prize_name} ({fmt(r.cost)} pts)</span>
+                      <span className="text-[var(--dim)]">solicitó {Math.max(1, Math.trunc(Number((r as { quantity?: number }).quantity ?? 1))) > 1 ? `${Math.max(1, Math.trunc(Number((r as { quantity?: number }).quantity ?? 1)))}x ${r.prize_name}` : r.prize_name} ({fmt(r.cost)} pts)</span>
                       <span className="block text-xs text-[var(--dim)]">Pedida el {fmtDateTime(r.created_at)}{r.resolved_at ? ` · Resuelta el ${fmtDateTime(r.resolved_at)}` : ""}</span>
                     </div>
                     {r.status === "approved" ? (
@@ -998,7 +1036,7 @@ export default function Master() {
         {/* Premios — como el Master */}
         <section aria-label="Administrar premios" className="panel p-4 sm:p-5">
           <h2 className="font-pixel text-sm text-[var(--text)]">PREMIOS</h2>
-          <p className="mt-2 text-sm text-[var(--dim)]">Cada premio muestra cuántas unidades quedan: <strong className="text-[var(--text)]">Disponibles</strong>. Sube o baja el inventario con los botones − / + o edítalo con el lápiz de cada premio. Cuando un colaborador canjea, el inventario baja 1 solo; al llegar a 0 el premio se marca <strong className="text-[var(--text)]">Agotado</strong> y ya no se puede canjear.</p>
+          <p className="mt-2 text-sm text-[var(--dim)]">Cada premio muestra cuántas unidades quedan: <strong className="text-[var(--text)]">Disponibles</strong>. Sube o baja el inventario con los botones − / + o edítalo con el lápiz de cada premio. Cuando un colaborador canjea, el inventario baja según la cantidad canjeada; al llegar a 0 el premio se marca <strong className="text-[var(--text)]">Agotado</strong> y ya no se puede canjear. El <strong className="text-[var(--text)]">BONO DE PUNTUALIDAD</strong> (500 pts, stock 100) solo se canjea con puntos de puntualidad.</p>
           <ul className="mt-3 flex flex-col divide-y divide-[var(--border)]">
             {state.prizes.map((prize) => (
               <li key={prize.id} className="py-2.5">
