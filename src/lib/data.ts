@@ -67,7 +67,12 @@ function normLabel(s: string): string {
 export function isPunctualityAction(actionId: number | null, label: string): boolean {
   if (actionId != null && PUNCTUALITY_ACTION_IDS.includes(actionId)) return true;
   const n = normLabel(label);
-  return n.includes("check in puntual") || n.includes("semana sin faltas") || n.includes("mes perfecto");
+  // Nombres nuevos de Osbed (2026-11-13 noche): "check in" a secas y
+  // "Puntualidad perfecta | Mes" no contenían "check in puntual" ni
+  // "mes perfecto", así que no se detectaban como puntualidad: ni el
+  // chip PUNTUALIDAD ni el sub-saldo. "check in" cubre "check in
+  // puntual"; "puntualidad" cubre cualquier variante con esa palabra.
+  return n.includes("check in") || n.includes("semana sin faltas") || n.includes("mes perfecto") || n.includes("puntualidad");
 }
 // Qué faltas restan de punctuality_points (además de del saldo total):
 // Retardo y Falta injustificada. "No reportar avance / falta de

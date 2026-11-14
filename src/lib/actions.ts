@@ -261,25 +261,30 @@ export async function awardPoints(collaboratorId: number, actionId: number, labe
     const balances = await getBalances(db, collaboratorId);
     if (!balances) return { ok: false as const, error: "colaborador no encontrado" };
     const newPoints = balances.points + total;
-    // Acción de puntualidad: el mismo monto suma también al sub-saldo.
-    const punctualityDelta = isPunctualityAction(actionId || null, label) ? total : 0;
-    const newPunctualityPoints = Math.max(0, Math.min(newPoints, balances.punctualityPoints + punctualityDelta));
     // Bolsa exclusiva: si la acción está ligada a un premio (o es de
     // puntualidad), el mismo monto suma a la bolsa de ese premio.
+    // Se calcula ANTES del sub-saldo: una acción con nombre nuevo
+    // ligada al BONO DE PUNTUALIDAD (ej. "check in", "Puntualidad
+    // perfecta | Mes") también es de puntualidad aunque su nombre no
+    // esté en la lista vieja; sin esto su bolsa no crecía.
     let linkedPrizeId: number | null = null;
-    let bagAfter = 0;
+    let bonoPrizeId: number | null = null;
     if (actionId) {
       const prizes = dbErr(await db.from("prizes").select("*").order("id")) as Prize[];
       const actionRow = dbErr(await db.from("action_types").select("*").eq("id", actionId).maybeSingle()) as ActionType | null;
-      const bonoPrizeId = await getBonoPrizeId(db);
+      bonoPrizeId = await getBonoPrizeId(db);
       linkedPrizeId = linkedPrizeForAction(actionRow ?? { id: actionId, label, points: basePoints, linked_prize_id: null }, prizes);
-      if (linkedPrizeId != null) {
-        const bags = await getBags(db, collaboratorId, balances, bonoPrizeId);
-        const after: BagMap = { ...bags, [linkedPrizeId]: (bags[linkedPrizeId] ?? 0) + total };
-        if (linkedPrizeId === bonoPrizeId) after[linkedPrizeId] = newPunctualityPoints;
-        await persistBags(db, collaboratorId, after, bonoPrizeId);
-        bagAfter = after[linkedPrizeId];
-      }
+    }
+    // Acción de puntualidad: el mismo monto suma también al sub-saldo.
+    const punctualityDelta = (isPunctualityAction(actionId || null, label) || (linkedPrizeId != null && linkedPrizeId === bonoPrizeId)) ? total : 0;
+    const newPunctualityPoints = Math.max(0, Math.min(newPoints, balances.punctualityPoints + punctualityDelta));
+    let bagAfter = 0;
+    if (actionId && linkedPrizeId != null) {
+      const bags = await getBags(db, collaboratorId, balances, bonoPrizeId);
+      const after: BagMap = { ...bags, [linkedPrizeId]: (bags[linkedPrizeId] ?? 0) + total };
+      if (linkedPrizeId === bonoPrizeId) after[linkedPrizeId] = newPunctualityPoints;
+      await persistBags(db, collaboratorId, after, bonoPrizeId);
+      bagAfter = after[linkedPrizeId];
     }
     dbErr(await db.from("collaborators").update({ points: newPoints, punctuality_points: newPunctualityPoints }).eq("id", collaboratorId).select("id"));
     dbErr(await db.from("point_events").insert({
