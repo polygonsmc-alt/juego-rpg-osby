@@ -7,6 +7,8 @@ import Podium from "@/components/Podium";
 import Track from "@/components/Track";
 import PrizeCard from "@/components/PrizeCard";
 import { MerlinBox, CorvoBox } from "@/components/AnnouncementBox";
+import AnnouncementPopups from "@/components/AnnouncementPopups";
+import PushSubscribe from "@/components/PushSubscribe";
 import PixelAvatar from "@/components/PixelAvatar";
 import TierBadge from "@/components/TierBadge";
 
@@ -91,6 +93,8 @@ export default function LaCarrera() {
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]" data-theme={state.settings.theme} data-season={state.settings.season}>
+      {/* Pop-ups flotantes de Merlín y Corvo al entrar (solo comunicados nuevos) */}
+      <AnnouncementPopups announcements={state.announcements} crowAnnouncements={state.crow_announcements} season={state.settings.season} actionLabel={actionLabel} ready={live} />
       <main className="mx-auto w-full max-w-6xl px-3 pb-10 pt-4 sm:px-4">
         {/* Nombre y logo de la empresa (Master) */}
         {(state.settings.company_name || state.settings.logo_url) && (
@@ -105,9 +109,14 @@ export default function LaCarrera() {
         )}
 
         {/* Cambio de vista (Master) */}
-        <div className="panel mb-5 flex p-1.5" role="tablist" aria-label="Cambiar vista">
+        <div className="panel mb-3 flex p-1.5" role="tablist" aria-label="Cambiar vista">
           <a href="/" role="tab" aria-selected="true" className="min-h-11 flex-1 rounded-md px-3 py-2 text-center font-pixel text-[11px] sm:text-xs" style={{ background: "var(--accent)", color: "#14161f" }}>LA CARRERA</a>
           <a href="/master" role="tab" aria-selected="false" className="min-h-11 flex-1 rounded-md px-3 py-2 text-center font-pixel text-[11px] text-[var(--text)] sm:text-xs">PANEL MASTER</a>
+        </div>
+
+        {/* Notificaciones push (escritorio): solo comunicados de Merlín y Corvo */}
+        <div className="mb-5 flex justify-end">
+          <PushSubscribe />
         </div>
 
         {!live && (

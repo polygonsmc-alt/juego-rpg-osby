@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { ACTIONS, PENALTIES, COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, THEMES, AVATAR_NAMES, levelFor, isPunctualityAction, isPunctualityPenalty, isPunctualityPrize, punctualityBonusesAvailable, PUNCTUALITY_PRIZE_COST, linkedPrizeForAction, exclusivePrizeInfo, unitsAvailable } from "@/lib/data";
 import type { GameState, Collaborator, PointEvent, ActionType, PenaltyType, CollaboratorBag } from "@/lib/types";
-import { awardPoints, deductPoints, directRedeem, undoEvent, testConnection, resolveRedemption, addPrize, updatePrize, removePrize, publishAnnouncement, toggleAnnouncementAction, deleteAnnouncementAction, saveCompanyAction, saveAppearanceAction, addActionType, updateActionType, removeActionType, addCollaborator, updateCollaborator, removeCollaborator, addPenaltyType, updatePenaltyType, removePenaltyType, setCompanyLogo, removeCompanyLogo } from "@/lib/actions";
+import { awardPoints, deductPoints, directRedeem, undoEvent, testConnection, resolveRedemption, addPrize, updatePrize, removePrize, publishAnnouncement, toggleAnnouncementAction, deleteAnnouncementAction, saveCompanyAction, saveAppearanceAction, addActionType, updateActionType, removeActionType, addCollaborator, updateCollaborator, removeCollaborator, addPenaltyType, updatePenaltyType, removePenaltyType, setCompanyLogo, removeCompanyLogo, getPushSubscriberCount, sendTestPush } from "@/lib/actions";
 import { logoutPin } from "@/lib/auth";
 import PixelAvatar from "@/components/PixelAvatar";
 import TierBadge from "@/components/TierBadge";
@@ -119,6 +119,10 @@ export default function Master() {
   const [pubBonus, setPubBonus] = useState<Record<string, boolean>>({});
   const [pubMult, setPubMult] = useState<Record<string, number>>({});
   const [pubAction, setPubAction] = useState<Record<string, string>>({});
+  // Notificaciones push (escritorio): cuántos dispositivos suscritos
+  const [pushCount, setPushCount] = useState<number | null>(null);
+  const [pushMsg, setPushMsg] = useState<string | null>(null);
+  const [pushBusy, setPushBusy] = useState(false);
   // Editar premio
   const [editingPrize, setEditingPrize] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
@@ -177,6 +181,10 @@ export default function Master() {
         return "No le alcanzan los puntos exclusivos de esa bolsa para ese premio.";
       case "falta_migracion_0004":
         return "Falta correr la migración 0004 en Supabase (SQL Editor, archivo supabase/migrations/0004_add_linked_bags.sql) y hacer Redeploy en Vercel. Sin ella, sumar, restar o canjear no guarda las bolsas exclusivas.";
+      case "falta_migracion_0005":
+        return "Falta correr la migración 0005 en Supabase (SQL Editor, archivo supabase/migrations/0005_push_subscriptions.sql) y hacer Redeploy en Vercel. Sin ella, las notificaciones push no se guardan ni se envían.";
+      case "push_no_configurado":
+        return "Faltan las llaves VAPID en Vercel (NEXT_PUBLIC_VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY). Agrégalas en Settings > Environment Variables y haz Redeploy.";
       case "cantidad_invalida":
         return "La cantidad a canjear debe ser 1 o más.";
       case "already_reversed":
@@ -232,6 +240,10 @@ export default function Master() {
         settings: (s.data as GameState["settings"]) || prev.settings,
       }));
       setCompanyName((s.data as GameState["settings"])?.company_name ?? SEED.settings.company_name);
+      // Notificaciones push: cuántos dispositivos están suscritos. Si la
+      // tabla 0005 no existe, el conteo queda en null y se muestra "—".
+      const pc = await getPushSubscriberCount().catch(() => null);
+      if (pc && pc.ok) setPushCount(pc.count);
     } catch (e) {
       showMsg("err", `Error al cargar desde Supabase: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -296,6 +308,18 @@ export default function Master() {
     } catch (e) {
       showMsg("err", `Error al probar la conexión: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  async function doTestPush() {
+    setPushBusy(true);
+    setPushMsg(null);
+    try {
+      const res = await sendTestPush();
+      if (!res.ok) { setPushMsg(humanError(res.error)); return; }
+      setPushMsg(res.total === 0 ? "Prueba enviada, pero nadie está suscrito todavía. Pídeles que abran La Carrera en su computadora y toquen «Activar notificaciones»." : `Prueba enviada a ${res.sent} de ${res.total} dispositivo${res.total === 1 ? "" : "s"} suscritos. Revisa tu escritorio.`);
+    } catch (e) {
+      setPushMsg(`Error al enviar la prueba: ${e instanceof Error ? e.message : String(e)}`);
+    } finally { setPushBusy(false); }
   }
 
   async function doLogout() {
@@ -1097,6 +1121,20 @@ export default function Master() {
               </ul>
             </>
           )}
+        </section>
+
+        {/* Notificaciones push (escritorio): solo comunicados de Merlín y Corvo */}
+        <section aria-label="Notificaciones push" className="panel p-4 sm:p-5">
+          <h2 className="font-pixel text-sm text-[var(--text)]">NOTIFICACIONES PUSH</h2>
+          <p className="mt-2 text-sm text-[var(--dim)]">Cuando publicas o prendes un comunicado de Merlín o Corvo, les llega un aviso en el escritorio (Chrome/Windows) a los participantes que activaron las notificaciones en La Carrera. Sumar o restar puntos no manda avisos.</p>
+          <p className="mt-2 text-sm text-[var(--text)]">
+            Dispositivos suscritos: <strong>{pushCount == null ? "—" : fmt(pushCount)}</strong>
+            {pushCount === 0 && <span className="text-[var(--dim)]"> — nadie se ha suscrito todavía. Pídeles que abran La Carrera en su computadora y toquen «Activar notificaciones».</span>}
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" className={btnPrimary} disabled={pushBusy} onClick={doTestPush}>{pushBusy ? "ENVIANDO…" : "ENVIAR NOTIFICACIÓN DE PRUEBA"}</button>
+            {pushMsg && <p role="status" className="text-sm font-semibold text-[var(--text)]">{pushMsg}</p>}
+          </div>
         </section>
 
         {/* Merlín y Corvo — publicar + prender/apagar + borrar */}

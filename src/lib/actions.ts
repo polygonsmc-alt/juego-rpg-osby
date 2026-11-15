@@ -1,4 +1,5 @@
 "use server";
+import webpush from "web-push";
 import { supabaseAdmin, isSupabaseConfigured } from "./supabase";
 import { isMasterAuthenticated } from "./auth";
 import { bestBonus, isPunctualityAction, isPunctualityPenalty, isPunctualityPrize, linkedPrizeForAction, exclusivePrizeInfo, exclusiveShortfallMessage } from "./data";
@@ -737,6 +738,10 @@ export async function publishAnnouncement(table: "announcements" | "crow_announc
   try {
     const db = supabaseAdmin();
     dbErr(await db.from(table).insert({ title, body, active: true, bonus_multiplier: bonusMultiplier, bonus_action_id: bonusActionId }).select("id"));
+    // Avisar por push a los participantes suscritos (solo comunicados).
+    // Si el push falla (sin llaves VAPID o sin tabla 0005), el comunicado
+    // queda publicado igual: el error no se devuelve aquí.
+    await sendPushToAll(pushTitleFor(table, title), body || title);
     return { ok: true as const };
   } catch (e) { return { ok: false as const, error: errText(e) }; }
 }
@@ -751,6 +756,12 @@ export async function toggleAnnouncementAction(table: "announcements" | "crow_an
     const db = supabaseAdmin();
     const { error } = await db.from(table).update({ active: !active }).eq("id", id);
     if (error) throw new Error(error.message);
+    // Si se acaba de PRENDER, avisar por push a los suscritos.
+    if (!active) {
+      const row = await db.from(table).select("title, body").eq("id", id).maybeSingle();
+      const t = (row.data as { title?: string } | null)?.title;
+      if (t) await sendPushToAll(pushTitleFor(table, t), ((row.data as { body?: string } | null)?.body || t));
+    }
     return { ok: true as const, active: !active };
   } catch (e) { return { ok: false as const, error: errText(e) }; }
 }
@@ -826,3 +837,124 @@ export async function saveAppearanceAction(theme: string, season: string) {
     return { ok: true as const };
   } catch (e) { return { ok: false as const, error: errText(e) }; }
 }
+
+// --- Notificaciones push (Chrome/escritorio) — migración 0005 ---
+// Solo comunicados de Merlín y Corvo: cuando Osbed publica o prende
+// uno, el servidor avisa a todos los navegadores suscritos con
+// web-push (llaves VAPID en Vercel). Sumar/restar puntos no avisa.
+// Si faltan las llaves o la tabla, el comunicado se publica igual y
+// el push se salta en silencio (el Master lo avisa con la prueba).
+type PushSubInput = { endpoint: string; keys: { p256dh: string; auth: string } };
+
+function vapidConfig(): { publicKey: string; privateKey: string; subject: string } | null {
+  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "";
+  const privateKey = process.env.VAPID_PRIVATE_KEY || "";
+  if (!publicKey || !privateKey) return null;
+  return { publicKey, privateKey, subject: process.env.VAPID_SUBJECT || "https://juego-rpg-osby.vercel.app/" };
+}
+
+function isMissingPushTableError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e ?? "");
+  return msg.includes("push_subscriptions") || msg.includes("does not exist") || (e as { code?: string })?.code === "42P01";
+}
+
+function pushTitleFor(table: "announcements" | "crow_announcements", title: string): string {
+  return table === "announcements" ? `🧙 Merlín dice: ${title}` : `🐦‍⬛ Corvo dice: ${title}`;
+}
+
+// Manda la notificación a todos los suscritos; borra las
+// suscripciones que el navegador ya dio de baja (410/404). Nunca
+// rompe la acción que la llamó: si algo falla, devuelve el error.
+async function sendPushToAll(title: string, body: string): Promise<{ ok: boolean; sent: number; total: number; error?: string }> {
+  const vapid = vapidConfig();
+  if (!vapid) return { ok: false, sent: 0, total: 0, error: "push_no_configurado" };
+  if (!isSupabaseConfigured) return { ok: false, sent: 0, total: 0, error: "supabase_no_configurado" };
+  try {
+    const db = supabaseAdmin();
+    const { data, error } = await db.from("push_subscriptions").select("endpoint, p256dh, auth");
+    if (error) throw new Error(error.message);
+    const subs = (data as { endpoint: string; p256dh: string; auth: string }[]) || [];
+    webpush.setVapidDetails(vapid.subject, vapid.publicKey, vapid.privateKey);
+    const payload = JSON.stringify({ title, body, url: "/" });
+    let sent = 0;
+    const dead: string[] = [];
+    await Promise.all(subs.map(async (s) => {
+      try {
+        await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload);
+        sent++;
+      } catch (e) {
+        const status = (e as { statusCode?: number })?.statusCode;
+        if (status === 410 || status === 404) dead.push(s.endpoint);
+      }
+    }));
+    for (const endpoint of dead) {
+      await db.from("push_subscriptions").delete().eq("endpoint", endpoint);
+    }
+    return { ok: true, sent, total: subs.length };
+  } catch (e) {
+    if (isMissingPushTableError(e)) return { ok: false, sent: 0, total: 0, error: "falta_migracion_0005" };
+    return { ok: false, sent: 0, total: 0, error: errText(e) };
+  }
+}
+
+// Guardar la suscripción del navegador (La Carrera, sin PIN: el
+// participante se suscribe solo).
+export async function savePushSubscription(sub: PushSubInput) {
+  if (!isSupabaseConfigured) return notConfigured();
+  if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) {
+    return { ok: false as const, error: "Suscripción inválida." };
+  }
+  try {
+    const db = supabaseAdmin();
+    const { error } = await db.from("push_subscriptions").upsert(
+      { endpoint: sub.endpoint, p256dh: sub.keys.p256dh, auth: sub.keys.auth },
+      { onConflict: "endpoint" },
+    ).select("id");
+    if (error) throw new Error(error.message);
+    return { ok: true as const };
+  } catch (e) {
+    if (isMissingPushTableError(e)) return { ok: false as const, error: "falta_migracion_0005" };
+    return { ok: false as const, error: errText(e) };
+  }
+}
+
+// Quitar la suscripción (La Carrera, sin PIN).
+export async function removePushSubscription(endpoint: string) {
+  if (!isSupabaseConfigured) return notConfigured();
+  if (!endpoint) return { ok: false as const, error: "Sin suscripción." };
+  try {
+    const db = supabaseAdmin();
+    const { error } = await db.from("push_subscriptions").delete().eq("endpoint", endpoint).select("id");
+    if (error) throw new Error(error.message);
+    return { ok: true as const };
+  } catch (e) {
+    if (isMissingPushTableError(e)) return { ok: false as const, error: "falta_migracion_0005" };
+    return { ok: false as const, error: errText(e) };
+  }
+}
+
+// Cuántos dispositivos están suscritos (Master, con PIN).
+export async function getPushSubscriberCount() {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  try {
+    const db = supabaseAdmin();
+    const { count, error } = await db.from("push_subscriptions").select("*", { count: "exact", head: true });
+    if (error) throw new Error(error.message);
+    return { ok: true as const, count: count ?? 0 };
+  } catch (e) {
+    if (isMissingPushTableError(e)) return { ok: false as const, error: "falta_migracion_0005" };
+    return { ok: false as const, error: errText(e) };
+  }
+}
+
+// Enviar una notificación de prueba a todos los suscritos (Master, con PIN).
+export async function sendTestPush() {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  const res = await sendPushToAll("🔔 Notificación de prueba", "Si ves este aviso en tu escritorio, las notificaciones del juego ya funcionan.");
+  if (!res.ok) return { ok: false as const, error: res.error ?? "No se pudo enviar la prueba." };
+  return { ok: true as const, sent: res.sent, total: res.total };
+}
+

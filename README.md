@@ -43,6 +43,17 @@ nivel Novato, empatados.
   900 / 3, Tablet Samsung A11+ 1400 / 2, TV TCL 50" 2000 / 1,
   PS5 100000 / 1 — Premio Mayor dorado dinámico (el más caro),
   BONO DE PUNTUALIDAD 500 / 100 (solo con puntos de puntualidad).
+- **Pop-ups de Merlín y Corvo** — al entrar a La Carrera, los comunicados
+  activos salen como ventanas flotantes que se cierran con ✕ (o con
+  ENTENDIDO / Escape). Solo vuelven a salir cuando Osbed publica un
+  comunicado nuevo; los recuadros fijos de arriba se quedan como están.
+- **Notificaciones push (escritorio)** — en La Carrera hay un botón
+  "🔔 Activar notificaciones": con permiso del navegador (Chrome en
+  Windows), les llega el aviso en el escritorio aunque la página esté
+  cerrada. Solo comunicados de Merlín y Corvo; sumar/restar puntos no
+  avisa. En el Master se ve cuántos dispositivos están suscritos y hay
+  un botón "ENVIAR NOTIFICACIÓN DE PRUEBA". Requiere la migración
+  0005 y las llaves VAPID en Vercel (ver abajo).
 - **Tema / temporada actual:** Bosque + Navidad (nieve, pinos con luces,
   Merlín con gorro de Santa y trineo).
 
@@ -75,6 +86,8 @@ En Supabase > SQL Editor, pega y ejecuta:
 supabase/migrations/0001_init.sql
 supabase/migrations/0002_add_area.sql
 supabase/migrations/0003_add_punctuality_points.sql
+supabase/migrations/0004_add_linked_bags.sql
+supabase/migrations/0005_push_subscriptions.sql
 ```
 
 Ese archivo crea: `collaborators`, `action_types`, `penalty_types`,
@@ -82,8 +95,8 @@ Ese archivo crea: `collaborators`, `action_types`, `penalty_types`,
 `crow_announcements` (Corvo), `settings`, habilita RLS y Realtime,
 y siembra los 3 participantes en 0, los 7 premios con stock (incluido el
 BONO DE PUNTUALIDAD), el comunicado de Merlín y los 4 de Corvo (el primero
-activo, sin bono). Para una instalación nueva, corre 0001, luego 0002 y
-luego 0003, en ese orden.
+activo, sin bono). Para una instalación nueva, corre 0001, luego 0002,
+0003, 0004 y 0005, en ese orden.
 
 ## Migración 0003 — sub-saldo de puntualidad (base ya creada)
 
@@ -100,6 +113,34 @@ reconstruye el sub-saldo de cada colaborador desde su historial
 (check-in puntual y semana sin faltas, menos Retardo y Falta
 injustificada, sin pasar del saldo total). Sin correrla, el Master nuevo
 falla al sumar, restar o canjear. Volver a correrla es seguro.
+
+## Migración 0005 — notificaciones push (base ya creada)
+
+Si tu base ya existe, en Supabase > SQL Editor pega y ejecuta **antes**
+de hacer Redeploy en Vercel:
+
+```
+supabase/migrations/0005_push_subscriptions.sql
+```
+
+Crea la tabla `push_subscriptions` (endpoint + llaves del navegador).
+Sin correrla, el botón "Activar notificaciones" no guarda nada y el
+Master no puede enviar avisos. Volver a correrla es seguro.
+
+## Notificaciones push — llaves VAPID
+
+1. Genera las llaves una sola vez: `npx web-push generate-vapid-keys`.
+2. En Vercel > proyecto > **Settings > Environment Variables** agrega:
+   `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (la pública), `VAPID_PRIVATE_KEY`
+   (la privada, sin `NEXT_PUBLIC_`) y `VAPID_SUBJECT` con la URL del
+   juego (`https://juego-rpg-osby.vercel.app/`).
+3. **Redeploy**.
+4. Prueba: abre La Carrera en Chrome (Windows), toca "🔔 Activar
+   notificaciones" y permite. En el Master, "ENVIAR NOTIFICACIÓN DE
+   PRUEBA" debe aparecer en el escritorio. Al publicar o prender un
+   comunicado de Merlín o Corvo, les llega el aviso a todos los
+   suscritos. Sin las llaves, el botón no se ve y los comunicados se
+   publican igual, sin avisos.
 
 ## Proteger el Master con PIN
 
