@@ -1,4 +1,4 @@
-import type { ActionType, PenaltyType, Prize, Collaborator, Announcement, Settings } from "./types";
+import type { ActionType, PenaltyType, Prize, Collaborator, Announcement, Settings, SocialStateId, ReactionItem, KudoItem, JoyaKind } from "./types";
 
 export const COMPANY_DEFAULT = "SCRIPT TECNOLOGIAS DE LA INFORMACION";
 
@@ -146,9 +146,9 @@ export function premioMayor(prizes: Prize[]): Prize | null {
 }
 
 export const COLLABORATORS_SEED: Collaborator[] = [
-  { id: 1, name: "FANY MOTA", sprite: 2, points: 0, punctuality_points: 0, area: "Marketing" },
-  { id: 2, name: "OSBED", sprite: 0, points: 0, punctuality_points: 0, area: "Diseño gráfico" },
-  { id: 3, name: "mayra morua", sprite: 10, points: 0, punctuality_points: 0, area: "Marketing" },
+  { id: 1, name: "FANY MOTA", sprite: 2, points: 0, punctuality_points: 0, social_state: "cooperativo", area: "Marketing" },
+  { id: 2, name: "OSBED", sprite: 0, points: 0, punctuality_points: 0, social_state: "cooperativo", area: "Diseño gráfico" },
+  { id: 3, name: "mayra morua", sprite: 10, points: 0, punctuality_points: 0, social_state: "cooperativo", area: "Marketing" },
 ];
 
 export const MERLIN_SEED: Announcement[] = [
@@ -210,4 +210,56 @@ export function bestBonus(
   // El más fuerte, no se suman.
   candidates.sort((x, y) => y.multiplier - x.multiplier);
   return candidates[0];
+}
+
+// --- Vista Social (migración 0006) ---
+// Semáforo: estados de misión que comunican disponibilidad sin sonar
+// grosero. Cada persona cambia SU propio estado desde Social.
+export const SOCIAL_STATES: { id: SocialStateId; label: string; emoji: string; text: string; color: string }[] = [
+  { id: "escudo", label: "Modo Escudo (Deep Work)", emoji: "🛡️", text: "En medio de una misión crítica, dame 1 hora y regreso.", color: "#2563eb" },
+  { id: "cooperativo", label: "Modo Cooperativo", emoji: "⚔️", text: "Tengo espacio para rebotar ideas o echar una mano.", color: "#1d9e4b" },
+  { id: "fuegos", label: "Apagando Fuegos", emoji: "🔥", text: "Atendiendo urgencias, respuestas breves.", color: "#d93a36" },
+  { id: "taberna", label: "En la Taberna (Break)", emoji: "☕", text: "Tomando un respiro / café.", color: "#b45309" },
+];
+export function socialStateInfo(id: string | null | undefined): { id: SocialStateId; label: string; emoji: string; text: string; color: string } {
+  return SOCIAL_STATES.find((s) => s.id === id) ?? SOCIAL_STATES[1];
+}
+// Reacciones tipo Loot del Muro de Victorias (una de cada ítem por
+// persona y publicación). `icon` es la clave del arte pixel en sprites.tsx.
+export const REACTION_ITEMS: { id: ReactionItem; label: string; icon: string }[] = [
+  { id: "pocion", label: "Poción de energía", icon: "pocion" },
+  { id: "moneda", label: "Moneda de oro", icon: "moneda" },
+  { id: "corona", label: "Corona", icon: "corona" },
+  { id: "cafe", label: "Café", icon: "cafe" },
+];
+// Catálogo de la Máquina Expendedora de Pócimas (kudos directos).
+export const KUDO_ITEMS: { id: KudoItem; label: string; icon: string; hint: string }[] = [
+  { id: "espresso", label: "Espresso doble", icon: "espresso", hint: "Por salvarme en la junta" },
+  { id: "escudo", label: "Escudo anti-estrés", icon: "escudo", hint: "Para aguantar la semana" },
+  { id: "pocion", label: "Poción de energía", icon: "pocion", hint: "Para recargar pilas" },
+  { id: "cafe", label: "Café para el camino", icon: "cafe", hint: "Para llevar" },
+];
+export const KUDOS_PER_DAY = 3; // monedas al día por persona
+// Tipos del Buzón de Joyas Ocultas (1 por persona y semana).
+export const JOYA_KINDS: { id: JoyaKind; label: string }[] = [
+  { id: "cancion", label: "Canción para concentrarse" },
+  { id: "comida", label: "Lugar para comer" },
+  { id: "atajo", label: "Atajo de Excel" },
+  { id: "meme", label: "Meme sano" },
+  { id: "otro", label: "Otro" },
+];
+// Fecha (AAAA-MM-DD) y lunes de la semana (lunes a domingo) en hora de
+// Ciudad de México: así "3 por día" y "1 por semana" se cuentan como los
+// vive el equipo, no en UTC del servidor.
+export function mexicoCityDate(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Mexico_City", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+}
+export function mexicoCityWeekMonday(d: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Mexico_City", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(d);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  const y = get("year"), m = get("month"), day = get("day");
+  const utc = new Date(Date.UTC(y, m - 1, day));
+  const dow = utc.getUTCDay(); // 0 = domingo
+  const monday = new Date(Date.UTC(y, m - 1, day - ((dow + 6) % 7)));
+  return monday.toISOString().slice(0, 10);
 }

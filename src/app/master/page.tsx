@@ -2,8 +2,8 @@
 import { useEffect, useState } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { ACTIONS, PENALTIES, COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, THEMES, AVATAR_NAMES, levelFor, isPunctualityAction, isPunctualityPenalty, isPunctualityPrize, punctualityBonusesAvailable, PUNCTUALITY_PRIZE_COST, linkedPrizeForAction, exclusivePrizeInfo, unitsAvailable } from "@/lib/data";
-import type { GameState, Collaborator, PointEvent, ActionType, PenaltyType, CollaboratorBag } from "@/lib/types";
-import { awardPoints, deductPoints, directRedeem, undoEvent, testConnection, resolveRedemption, addPrize, updatePrize, removePrize, publishAnnouncement, toggleAnnouncementAction, deleteAnnouncementAction, saveCompanyAction, saveAppearanceAction, addActionType, updateActionType, removeActionType, addCollaborator, updateCollaborator, removeCollaborator, addPenaltyType, updatePenaltyType, removePenaltyType, setCompanyLogo, removeCompanyLogo, getPushSubscriberCount, sendTestPush } from "@/lib/actions";
+import type { GameState, Collaborator, PointEvent, ActionType, PenaltyType, CollaboratorBag, SocialPost, SocialJoya } from "@/lib/types";
+import { awardPoints, deductPoints, directRedeem, undoEvent, testConnection, resolveRedemption, addPrize, updatePrize, removePrize, publishAnnouncement, toggleAnnouncementAction, deleteAnnouncementAction, saveCompanyAction, saveAppearanceAction, addActionType, updateActionType, removeActionType, addCollaborator, updateCollaborator, removeCollaborator, addPenaltyType, updatePenaltyType, removePenaltyType, setCompanyLogo, removeCompanyLogo, getPushSubscriberCount, sendTestPush, deleteSocialPost, deleteSocialJoya } from "@/lib/actions";
 import { logoutPin } from "@/lib/auth";
 import PixelAvatar from "@/components/PixelAvatar";
 import TierBadge from "@/components/TierBadge";
@@ -123,6 +123,12 @@ export default function Master() {
   const [pushCount, setPushCount] = useState<number | null>(null);
   const [pushMsg, setPushMsg] = useState<string | null>(null);
   const [pushBusy, setPushBusy] = useState(false);
+  // Moderación de Social (vista Social, migración 0006): publicaciones
+  // y joyas recientes para borrar. socialMissing = falta la migración.
+  const [socialPosts, setSocialPosts] = useState<SocialPost[]>([]);
+  const [socialJoyas, setSocialJoyas] = useState<SocialJoya[]>([]);
+  const [socialMissing, setSocialMissing] = useState(false);
+  const [confirmDeleteSocial, setConfirmDeleteSocial] = useState<string | null>(null);
   // Editar premio
   const [editingPrize, setEditingPrize] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
@@ -183,6 +189,8 @@ export default function Master() {
         return "Falta correr la migración 0004 en Supabase (SQL Editor, archivo supabase/migrations/0004_add_linked_bags.sql) y hacer Redeploy en Vercel. Sin ella, sumar, restar o canjear no guarda las bolsas exclusivas.";
       case "falta_migracion_0005":
         return "Falta correr la migración 0005 en Supabase (SQL Editor, archivo supabase/migrations/0005_push_subscriptions.sql) y hacer Redeploy en Vercel. Sin ella, las notificaciones push no se guardan ni se envían.";
+      case "falta_migracion_0006":
+        return "Falta correr la migración 0006 en Supabase (SQL Editor, archivo supabase/migrations/0006_social.sql) y hacer Redeploy en Vercel. Sin ella, la vista Social no guarda estados, victorias, pócimas ni joyas.";
       case "push_no_configurado":
         return "Faltan las llaves VAPID en Vercel (NEXT_PUBLIC_VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY). Agrégalas en Settings > Environment Variables y haz Redeploy.";
       case "cantidad_invalida":
@@ -227,6 +235,21 @@ export default function Master() {
       // no exista (migración 0004 sin correr): en ese caso quedan en [].
       const bagsRes = await supabase.from("collaborator_bags").select("*");
       const bags = (bagsRes.error ? [] : (bagsRes.data as CollaboratorBag[]) || []) as CollaboratorBag[];
+      // Moderación de Social: se tolera que las tablas 0006 aún no
+      // existan (migración sin correr): en ese caso quedan en [] y se
+      // muestra el aviso en la sección SOCIAL.
+      const [sp, sj] = await Promise.all([
+        supabase.from("social_posts").select("*").order("created_at", { ascending: false }).limit(20),
+        supabase.from("social_joyas").select("*").order("created_at", { ascending: false }).limit(20),
+      ]);
+      const socialErr = (x: { error: { message: string; code?: string } | null }) => {
+        if (!x.error) return false;
+        const m = x.error.message || "";
+        return m.includes("social_posts") || m.includes("social_joyas") || m.includes("does not exist") || (x.error as { code?: string }).code === "42P01";
+      };
+      setSocialMissing(socialErr(sp) || socialErr(sj));
+      setSocialPosts(sp.error ? [] : ((sp.data as SocialPost[]) || []));
+      setSocialJoyas(sj.error ? [] : ((sj.data as SocialJoya[]) || []));
       setState((prev) => ({
         collaborators: ((c.data as Collaborator[]) || prev.collaborators).map((x) => ({ ...x, punctuality_points: (x as Collaborator).punctuality_points ?? 0, area: x.area ?? null })),
         action_types: (at.data as ActionType[])?.length ? (at.data as ActionType[]).map((x) => ({ ...x, linked_prize_id: (x as ActionType).linked_prize_id ?? null })) : prev.action_types,
@@ -320,6 +343,20 @@ export default function Master() {
     } catch (e) {
       setPushMsg(`Error al enviar la prueba: ${e instanceof Error ? e.message : String(e)}`);
     } finally { setPushBusy(false); }
+  }
+
+  // Moderación de Social (con PIN): borrar una victoria del Muro o una
+  // Joya Oculta. La confirmación es en dos pasos, como al eliminar un
+  // colaborador.
+  async function doDeleteSocial(kind: "post" | "joya", id: number) {
+    setBusy(true);
+    try {
+      const res = kind === "post" ? await deleteSocialPost(id) : await deleteSocialJoya(id);
+      if (!res.ok) { showMsg("err", humanError(res.error)); return; }
+      setConfirmDeleteSocial(null);
+      showMsg("ok", kind === "post" ? "Victoria eliminada del Muro." : "Joya eliminada del buzón.");
+      await load();
+    } finally { setBusy(false); }
   }
 
   async function doLogout() {
@@ -734,6 +771,7 @@ export default function Master() {
         )}
 
         <div className="panel mb-5 flex p-1.5" role="tablist" aria-label="Cambiar vista">
+          <a href="/social" role="tab" aria-selected="false" className="min-h-11 flex-1 rounded-md px-3 py-2 text-center font-pixel text-[11px] text-[var(--text)] sm:text-xs">SOCIAL</a>
           <a href="/" role="tab" aria-selected="false" className="min-h-11 flex-1 rounded-md px-3 py-2 text-center font-pixel text-[11px] text-[var(--text)] sm:text-xs">LA CARRERA</a>
           <a href="/master" role="tab" aria-selected="true" className="min-h-11 flex-1 rounded-md px-3 py-2 text-center font-pixel text-[11px] sm:text-xs" style={{ background: "var(--accent)", color: "#14161f" }}>PANEL MASTER</a>
         </div>
@@ -1135,6 +1173,73 @@ export default function Master() {
             <button type="button" className={btnPrimary} disabled={pushBusy} onClick={doTestPush}>{pushBusy ? "ENVIANDO…" : "ENVIAR NOTIFICACIÓN DE PRUEBA"}</button>
             {pushMsg && <p role="status" className="text-sm font-semibold text-[var(--text)]">{pushMsg}</p>}
           </div>
+        </section>
+
+        {/* Moderación de Social (vista Social, migración 0006) */}
+        <section aria-label="Moderación de Social" className="panel p-4 sm:p-5">
+          <h2 className="font-pixel text-sm text-[var(--text)]">SOCIAL · MODERACIÓN</h2>
+          <p className="mt-2 text-sm text-[var(--dim)]">Las victorias del Muro y las joyas del buzón que publica el equipo. Si algo no va, se borra aquí (solo Master, con PIN).</p>
+          {socialMissing && (
+            <p className="mt-3 rounded-md border-2 border-red-500 bg-red-500/15 px-4 py-3 text-sm font-bold text-red-700 dark:text-red-300">
+              Falta correr la migración 0006 en Supabase (SQL Editor, archivo supabase/migrations/0006_social.sql) y hacer Redeploy en Vercel. Sin ella, Social no muestra ni guarda nada.
+            </p>
+          )}
+          <h3 className="font-pixel mb-2 mt-4 text-[11px] text-[var(--text)]">VICTORIAS RECIENTES</h3>
+          {socialPosts.length === 0 ? (
+            <p className="text-sm text-[var(--dim)]">Aún no hay victorias en el Muro.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {socialPosts.map((p) => {
+                const who = state.collaborators.find((c) => c.id === p.collaborator_id);
+                const key = `post:${p.id}`;
+                return (
+                  <li key={p.id} className="flex flex-wrap items-center gap-2 rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-[var(--text)]"><strong>{who?.name ?? "Alguien"}</strong> <span className="text-[var(--dim)]">· {timeAgo(p.created_at)}</span></p>
+                      <p className="text-sm text-[var(--text)]" style={{ overflowWrap: "anywhere" }}>{p.body}</p>
+                    </div>
+                    {confirmDeleteSocial === key ? (
+                      <span className="flex shrink-0 flex-wrap items-center gap-2">
+                        <span className="text-xs font-bold text-[var(--red)]">¿Eliminar?</span>
+                        <button type="button" className={btnDanger} disabled={busy} onClick={() => doDeleteSocial("post", p.id)}>SÍ, ELIMINAR</button>
+                        <button type="button" className={btnPrimary} onClick={() => setConfirmDeleteSocial(null)}>NO</button>
+                      </span>
+                    ) : (
+                      <button type="button" className={btnDanger} disabled={busy} onClick={() => setConfirmDeleteSocial(key)}>Eliminar</button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <h3 className="font-pixel mb-2 mt-5 text-[11px] text-[var(--text)]">JOYAS RECIENTES</h3>
+          {socialJoyas.length === 0 ? (
+            <p className="text-sm text-[var(--dim)]">Aún no hay joyas en el buzón.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {socialJoyas.map((j) => {
+                const who = state.collaborators.find((c) => c.id === j.collaborator_id);
+                const key = `joya:${j.id}`;
+                return (
+                  <li key={j.id} className="flex flex-wrap items-center gap-2 rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-[var(--text)]"><strong>{who?.name ?? "Alguien"}</strong> <span className="text-[var(--dim)]">· {j.kind} · {fmtDateTime(j.created_at)}</span></p>
+                      <p className="text-sm text-[var(--text)]" style={{ overflowWrap: "anywhere" }}>{j.body}</p>
+                    </div>
+                    {confirmDeleteSocial === key ? (
+                      <span className="flex shrink-0 flex-wrap items-center gap-2">
+                        <span className="text-xs font-bold text-[var(--red)]">¿Eliminar?</span>
+                        <button type="button" className={btnDanger} disabled={busy} onClick={() => doDeleteSocial("joya", j.id)}>SÍ, ELIMINAR</button>
+                        <button type="button" className={btnPrimary} onClick={() => setConfirmDeleteSocial(null)}>NO</button>
+                      </span>
+                    ) : (
+                      <button type="button" className={btnDanger} disabled={busy} onClick={() => setConfirmDeleteSocial(key)}>Eliminar</button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </section>
 
         {/* Merlín y Corvo — publicar + prender/apagar + borrar */}

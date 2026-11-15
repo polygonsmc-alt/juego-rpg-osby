@@ -88,6 +88,7 @@ supabase/migrations/0002_add_area.sql
 supabase/migrations/0003_add_punctuality_points.sql
 supabase/migrations/0004_add_linked_bags.sql
 supabase/migrations/0005_push_subscriptions.sql
+supabase/migrations/0006_social.sql
 ```
 
 Ese archivo crea: `collaborators`, `action_types`, `penalty_types`,
@@ -96,7 +97,7 @@ Ese archivo crea: `collaborators`, `action_types`, `penalty_types`,
 y siembra los 3 participantes en 0, los 7 premios con stock (incluido el
 BONO DE PUNTUALIDAD), el comunicado de Merlín y los 4 de Corvo (el primero
 activo, sin bono). Para una instalación nueva, corre 0001, luego 0002,
-0003, 0004 y 0005, en ese orden.
+0003, 0004, 0005 y 0006, en ese orden.
 
 ## Migración 0003 — sub-saldo de puntualidad (base ya creada)
 
@@ -127,6 +128,42 @@ Crea la tabla `push_subscriptions` (endpoint + llaves del navegador).
 Sin correrla, el botón "Activar notificaciones" no guarda nada y el
 Master no puede enviar avisos. Volver a correrla es seguro.
 
+## Migración 0006 — vista Social (base ya creada)
+
+Si tu base ya existe, en Supabase > SQL Editor pega y ejecuta **antes**
+de hacer Redeploy en Vercel:
+
+```
+supabase/migrations/0006_social.sql
+```
+
+Agrega `collaborators.social_state` (Semáforo) y crea las tablas
+`social_posts` (Muro de Victorias), `social_reactions` (loot),
+`social_kudos` (Pócimas) y `social_joyas` (Joyas Ocultas). Sin correrla,
+la vista Social muestra el aviso de migración pendiente y no guarda
+nada; La Carrera y el Master siguen funcionando igual. Volver a
+correrla es seguro.
+
+## Vista Social
+
+Tercera vista (`/social`), junto a La Carrera y al Panel Master. Sin
+login: cada persona elige quién es con el selector "Soy:" (se guarda
+en el navegador). Incluye:
+
+- **Semáforo**: estado de misión de cada avatar (🛡️ Escudo/Deep Work,
+  ⚔️ Cooperativo, 🔥 Apagando Fuegos, ☕ En la Taberna). Cada quien
+  cambia su propio estado.
+- **Muro de Victorias**: victorias cortas del día (máx 200 caracteres)
+  con reacciones tipo Loot (poción, moneda de oro, corona, café).
+- **Máquina Expendedora de Pócimas**: 3 monedas al día por persona
+  para regalar un ítem a un compañero (nunca a uno mismo); lo recibido
+  queda en la repisa de cada persona.
+- **Buzón de Joyas Ocultas**: 1 recomendación por semana y por persona
+  (lunes a domingo): canción, lugar para comer, atajo de Excel, meme
+  sano u otro.
+- **Moderación**: en el Panel Master, sección SOCIAL para borrar
+  victorias y joyas (con PIN).
+
 ## Notificaciones push — llaves VAPID
 
 1. Genera las llaves una sola vez: `npx web-push generate-vapid-keys`.
@@ -152,7 +189,7 @@ La versión final vive en `main` y se publica en
    `https://juego-rpg-osby-git-pruebas-osby.vercel.app/`; el link
    exacto sale en Vercel > Deployments, en la fila del preview).
 2. El preview usa su **propia base de Supabase** (proyecto aparte,
-   `juego-rpg-pruebas`, con las migraciones 0001 a 0005 corridas), así
+   `juego-rpg-pruebas`, con las migraciones 0001 a 0006 corridas), así
    probar no mueve los puntos reales. En Vercel > Settings >
    Environment Variables, las llaves de Supabase van por ambiente:
    las reales solo en **Production**, las de pruebas solo en

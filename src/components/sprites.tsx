@@ -975,6 +975,91 @@ const ICON_ART: Record<string, string[]> = {
     "..............",
     "..............",
   ],
+  // ---- Loot de Social (vista Social, migración 0006) ----
+  pocion: [
+    ".....yy.......",
+    ".....kk.......",
+    "....kppk......",
+    "...kppppk.....",
+    "...kppppk.....",
+    "..kppppppk....",
+    "..kppppppk....",
+    "..kppwwpppk...",
+    "..kppppppk....",
+    "..kppppppk....",
+    "...kkkkkk.....",
+    "..............",
+  ],
+  moneda: [
+    "....yyyyyy....",
+    "..yyyyyyyyyy..",
+    "..yywwwwwwyy..",
+    "..ywyyyyyywy..",
+    "..ywyywwyywy..",
+    "..ywyyyyyywy..",
+    "..ywyywwyywy..",
+    "..ywyyyyyywy..",
+    "..yywwwwwwyy..",
+    "..yyyyyyyyyy..",
+    "....yyyyyy....",
+    "..............",
+  ],
+  corona: [
+    "..............",
+    ".y..........y.",
+    ".yy........yy.",
+    ".yyy......yyy.",
+    ".yyyyyyyyyyyy.",
+    ".yyyyryyyyyyy.",
+    ".yyyyyyyyyyyy.",
+    "..yyyyyyyyyy..",
+    "..yyyyyyyyyy..",
+    "..yyyyyyyyyy..",
+    "...yyyyyyyy...",
+    "..............",
+  ],
+  cafe: [
+    "...ww.........",
+    "..ww..........",
+    "...ww.........",
+    "..............",
+    "..kkkkkkkk....",
+    "..kooooook....",
+    "..kooooookk...",
+    "..kooooookk...",
+    "..kooooook....",
+    "..kooooook....",
+    "...kkkkkk.....",
+    "..............",
+  ],
+  escudo: [
+    "..kkkkkkkkkk..",
+    ".kbbbbbbbbbbk.",
+    ".kbbbbbbbbbbk.",
+    ".kbbwwwwwwbbk.",
+    ".kbbwwwwwwbbk.",
+    ".kbbbbbbbbbbk.",
+    ".kbbbbbbbbbbk.",
+    "..kbbbbbbbbk..",
+    "...kbbbbbbk...",
+    "....kbbbbk....",
+    ".....kbbk.....",
+    "......kk......",
+  ],
+  espresso: [
+    "..............",
+    "....ww........",
+    "...ww.........",
+    "....ww........",
+    "..............",
+    "...kkkkkkk....",
+    "...koooook....",
+    "...kowooook...",
+    "...koooook....",
+    "....kkkkk.....",
+    "..............",
+    "..............",
+  ],
 };
 
 const ICON_COLORS: Record<string, string> = {
@@ -985,6 +1070,8 @@ const ICON_COLORS: Record<string, string> = {
   r: "#ef5350",
   y: "#ffd23e",
   n: "#3ecf6e",
+  o: "#b45309",
+  p: "#c084fc",
 };
 
 export const PRIZE_ICONS = [
@@ -999,9 +1086,11 @@ export const PRIZE_ICONS = [
 export function PrizeIcon({
   icon,
   size = 40,
+  label,
 }: {
   icon: string;
   size?: number;
+  label?: string;
 }) {
   const art = ICON_ART[icon] ?? ICON_ART["gift"]!;
   const rects: Array<{ x: number; y: number; fill: string }> = [];
@@ -1021,7 +1110,7 @@ export function PrizeIcon({
       width={size}
       height={Math.round(size * (12 / 14))}
       role="img"
-      aria-label="Ícono del premio"
+      aria-label={label ?? "Ícono del premio"}
       style={{ imageRendering: "pixelated", display: "block" }}
     >
       {rects.map((r, i) => (

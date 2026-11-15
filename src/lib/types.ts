@@ -11,6 +11,9 @@ export interface Collaborator {
   // mes perfecto). Sirve solo para canjear el BONO DE PUNTUALIDAD:
   // 500 pts de puntualidad = 1 bono. Nunca pasa de `points` ni baja de 0.
   punctuality_points: number;
+  // Estado de misión del Semáforo de Social (migración 0006):
+  // escudo, cooperativo, fuegos o taberna. Por defecto cooperativo.
+  social_state: string;
   area: string | null; // Área/departamento (ej. Ventas) — null = sin área todavía
   created_at?: string;
 }
@@ -99,6 +102,48 @@ export interface Settings {
   logo_url: string | null;
   theme: ThemeId;
   season: SeasonId;
+}
+
+// --- Vista Social (migración 0006) ---
+export type SocialStateId = "escudo" | "cooperativo" | "fuegos" | "taberna";
+export type ReactionItem = "pocion" | "moneda" | "corona" | "cafe";
+export type KudoItem = "espresso" | "escudo" | "pocion" | "cafe";
+export type JoyaKind = "cancion" | "comida" | "atajo" | "meme" | "otro";
+
+// Victoria del día colgada en el Muro (máx 200 caracteres).
+export interface SocialPost {
+  id: number;
+  collaborator_id: number;
+  body: string;
+  created_at: string;
+}
+
+// Reacción tipo Loot a una victoria (una de cada ítem por persona y publicación).
+export interface SocialReaction {
+  id: number;
+  post_id: number;
+  collaborator_id: number;
+  item: ReactionItem;
+  created_at: string;
+}
+
+// Pócima regalada (3 monedas al día por persona, nunca a uno mismo).
+export interface SocialKudo {
+  id: number;
+  from_id: number;
+  to_id: number;
+  item: KudoItem;
+  message: string | null;
+  created_at: string;
+}
+
+// Joya Oculta (1 por persona y semana, lunes a domingo).
+export interface SocialJoya {
+  id: number;
+  collaborator_id: number;
+  kind: JoyaKind;
+  body: string;
+  created_at: string;
 }
 
 export interface GameState {

@@ -2,7 +2,7 @@
 import webpush from "web-push";
 import { supabaseAdmin, isSupabaseConfigured } from "./supabase";
 import { isMasterAuthenticated } from "./auth";
-import { bestBonus, isPunctualityAction, isPunctualityPenalty, isPunctualityPrize, linkedPrizeForAction, exclusivePrizeInfo, exclusiveShortfallMessage } from "./data";
+import { bestBonus, isPunctualityAction, isPunctualityPenalty, isPunctualityPrize, linkedPrizeForAction, exclusivePrizeInfo, exclusiveShortfallMessage, mexicoCityDate, mexicoCityWeekMonday } from "./data";
 import type { Announcement, ActionType, Prize } from "./types";
 
 // Mensaje exacto que pide Osbed cuando no alcanzan los puntos de
@@ -956,5 +956,181 @@ export async function sendTestPush() {
   const res = await sendPushToAll("🔔 Notificación de prueba", "Si ves este aviso en tu escritorio, las notificaciones del juego ya funcionan.");
   if (!res.ok) return { ok: false as const, error: res.error ?? "No se pudo enviar la prueba." };
   return { ok: true as const, sent: res.sent, total: res.total };
+}
+
+// --- Vista Social (migración 0006) ---
+// Semáforo, Muro de Victorias, Pócimas y Joyas Ocultas. Las acciones de
+// los participantes NO piden PIN (cada quien actúa como "yo" según el
+// selector de Social, sin contraseña; es una herramienta interna). Solo
+// la moderación (borrar publicaciones y joyas) exige PIN del Master.
+// Si falta la migración 0006, las acciones devuelven
+// "falta_migracion_0006" y la vista Social muestra el aviso en vez de
+// romperse; La Carrera y el Master no se tocan.
+function isMissingSocialTableError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e ?? "");
+  return msg.includes("social_posts") || msg.includes("social_reactions") || msg.includes("social_kudos") || msg.includes("social_joyas") || msg.includes("social_state") || msg.includes("does not exist") || (e as { code?: string })?.code === "42P01";
+}
+const SOCIAL_STATES = ["escudo", "cooperativo", "fuegos", "taberna"] as const;
+const REACTION_ITEMS = ["pocion", "moneda", "corona", "cafe"] as const;
+const KUDO_ITEMS = ["espresso", "escudo", "pocion", "cafe"] as const;
+const JOYA_KINDS = ["cancion", "comida", "atajo", "meme", "otro"] as const;
+
+// Cambiar MI estado del Semáforo.
+export async function setSocialState(collaboratorId: number, state: string) {
+  if (!isSupabaseConfigured) return notConfigured();
+  if (!(SOCIAL_STATES as readonly string[]).includes(state)) {
+    return { ok: false as const, error: "Ese estado no existe." };
+  }
+  try {
+    const db = supabaseAdmin();
+    const coll = dbErr(await db.from("collaborators").select("id").eq("id", collaboratorId).maybeSingle());
+    if (!coll) return { ok: false as const, error: "colaborador no encontrado" };
+    dbErr(await db.from("collaborators").update({ social_state: state }).eq("id", collaboratorId).select("id"));
+    return { ok: true as const };
+  } catch (e) {
+    if (isMissingSocialTableError(e)) return { ok: false as const, error: "falta_migracion_0006" };
+    return { ok: false as const, error: errText(e) };
+  }
+}
+
+// Colgar una victoria en el Muro (máx 200 caracteres).
+export async function postVictory(collaboratorId: number, body: string) {
+  if (!isSupabaseConfigured) return notConfigured();
+  const text = (body ?? "").trim();
+  if (!text) return { ok: false as const, error: "Escribe tu victoria." };
+  if (text.length > 200) return { ok: false as const, error: "La victoria no puede pasar de 200 caracteres." };
+  try {
+    const db = supabaseAdmin();
+    const coll = dbErr(await db.from("collaborators").select("id").eq("id", collaboratorId).maybeSingle());
+    if (!coll) return { ok: false as const, error: "colaborador no encontrado" };
+    const ins = dbErr(await db.from("social_posts").insert({ collaborator_id: collaboratorId, body: text }).select("id").single());
+    return { ok: true as const, id: ins.id as number };
+  } catch (e) {
+    if (isMissingSocialTableError(e)) return { ok: false as const, error: "falta_migracion_0006" };
+    return { ok: false as const, error: errText(e) };
+  }
+}
+
+// Poner o quitar mi reacción Loot a una victoria (toggle, una de cada
+// ítem por persona y publicación).
+export async function toggleReaction(postId: number, collaboratorId: number, item: string) {
+  if (!isSupabaseConfigured) return notConfigured();
+  if (!(REACTION_ITEMS as readonly string[]).includes(item)) {
+    return { ok: false as const, error: "Ese ítem no existe." };
+  }
+  try {
+    const db = supabaseAdmin();
+    const post = dbErr(await db.from("social_posts").select("id").eq("id", postId).maybeSingle());
+    if (!post) return { ok: false as const, error: "publicación no encontrada" };
+    const existing = dbErr(await db.from("social_reactions").select("id").eq("post_id", postId).eq("collaborator_id", collaboratorId).eq("item", item).maybeSingle());
+    if (existing) {
+      dbErr(await db.from("social_reactions").delete().eq("id", (existing as { id: number }).id).select("id"));
+      return { ok: true as const, added: false };
+    }
+    dbErr(await db.from("social_reactions").insert({ post_id: postId, collaborator_id: collaboratorId, item }).select("id"));
+    return { ok: true as const, added: true };
+  } catch (e) {
+    if (isMissingSocialTableError(e)) return { ok: false as const, error: "falta_migracion_0006" };
+    return { ok: false as const, error: errText(e) };
+  }
+}
+
+// Regalar una pócima a un compañero: 3 monedas al día por persona (día
+// de Ciudad de México) y nunca a uno mismo. El límite se valida ANTES
+// de guardar, como los canjes.
+export async function sendKudo(fromId: number, toId: number, item: string, message?: string) {
+  if (!isSupabaseConfigured) return notConfigured();
+  if (!(KUDO_ITEMS as readonly string[]).includes(item)) {
+    return { ok: false as const, error: "Ese ítem no existe." };
+  }
+  if (fromId === toId) {
+    return { ok: false as const, error: "No te puedes regalar una pócima a ti mismo." };
+  }
+  const msg = (message ?? "").trim();
+  if (msg.length > 140) return { ok: false as const, error: "El mensaje no puede pasar de 140 caracteres." };
+  try {
+    const db = supabaseAdmin();
+    const [from, to] = await Promise.all([
+      db.from("collaborators").select("id").eq("id", fromId).maybeSingle(),
+      db.from("collaborators").select("id").eq("id", toId).maybeSingle(),
+    ]);
+    if (from.error) throw new Error(from.error.message);
+    if (to.error) throw new Error(to.error.message);
+    if (!from.data || !to.data) return { ok: false as const, error: "colaborador no encontrado" };
+    // Cuántas pócimas ya regaló hoy (se traen las de las últimas 48 h y
+    // se filtra por fecha de Ciudad de México, no por UTC del servidor).
+    const since = new Date(Date.now() - 48 * 3600 * 1000).toISOString();
+    const sent = dbErr(await db.from("social_kudos").select("created_at").eq("from_id", fromId).gte("created_at", since));
+    const todayMX = mexicoCityDate(new Date());
+    const sentToday = (sent as { created_at: string }[]).filter((r) => mexicoCityDate(new Date(r.created_at)) === todayMX).length;
+    if (sentToday >= 3) {
+      return { ok: false as const, error: "kudos_agotados", message: "Ya regalaste tus 3 pócimas de hoy. Mañana tienes 3 monedas nuevas." };
+    }
+    const ins = dbErr(await db.from("social_kudos").insert({ from_id: fromId, to_id: toId, item, message: msg || null }).select("id").single());
+    return { ok: true as const, id: ins.id as number, remaining: 3 - sentToday - 1 };
+  } catch (e) {
+    if (isMissingSocialTableError(e)) return { ok: false as const, error: "falta_migracion_0006" };
+    return { ok: false as const, error: errText(e) };
+  }
+}
+
+// Dejar una Joya Oculta: 1 por persona y semana (lunes a domingo, hora
+// de Ciudad de México). El límite se valida ANTES de guardar.
+export async function postJoya(collaboratorId: number, kind: string, body: string) {
+  if (!isSupabaseConfigured) return notConfigured();
+  if (!(JOYA_KINDS as readonly string[]).includes(kind)) {
+    return { ok: false as const, error: "Ese tipo de joya no existe." };
+  }
+  const text = (body ?? "").trim();
+  if (!text) return { ok: false as const, error: "Escribe tu recomendación." };
+  if (text.length > 200) return { ok: false as const, error: "La recomendación no puede pasar de 200 caracteres." };
+  try {
+    const db = supabaseAdmin();
+    const coll = dbErr(await db.from("collaborators").select("id").eq("id", collaboratorId).maybeSingle());
+    if (!coll) return { ok: false as const, error: "colaborador no encontrado" };
+    const since = new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString();
+    const mine = dbErr(await db.from("social_joyas").select("created_at").eq("collaborator_id", collaboratorId).gte("created_at", since));
+    const week = mexicoCityWeekMonday(new Date());
+    const thisWeek = (mine as { created_at: string }[]).some((r) => mexicoCityWeekMonday(new Date(r.created_at)) === week);
+    if (thisWeek) {
+      return { ok: false as const, error: "joya_ya_publicada", message: "Ya dejaste tu joya de esta semana. La próxima semana puedes dejar otra." };
+    }
+    const ins = dbErr(await db.from("social_joyas").insert({ collaborator_id: collaboratorId, kind, body: text }).select("id").single());
+    return { ok: true as const, id: ins.id as number };
+  } catch (e) {
+    if (isMissingSocialTableError(e)) return { ok: false as const, error: "falta_migracion_0006" };
+    return { ok: false as const, error: errText(e) };
+  }
+}
+
+// Moderación del Master (con PIN): borrar una victoria del Muro. Las
+// reacciones se borran solas por ON DELETE CASCADE.
+export async function deleteSocialPost(postId: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  try {
+    const db = supabaseAdmin();
+    dbErr(await db.from("social_posts").delete().eq("id", postId).select("id"));
+    return { ok: true as const };
+  } catch (e) {
+    if (isMissingSocialTableError(e)) return { ok: false as const, error: "falta_migracion_0006" };
+    return { ok: false as const, error: errText(e) };
+  }
+}
+
+// Moderación del Master (con PIN): borrar una Joya Oculta.
+export async function deleteSocialJoya(joyaId: number) {
+  const auth = await requireMasterAuth();
+  if (auth) return auth;
+  if (!isSupabaseConfigured) return notConfigured();
+  try {
+    const db = supabaseAdmin();
+    dbErr(await db.from("social_joyas").delete().eq("id", joyaId).select("id"));
+    return { ok: true as const };
+  } catch (e) {
+    if (isMissingSocialTableError(e)) return { ok: false as const, error: "falta_migracion_0006" };
+    return { ok: false as const, error: errText(e) };
+  }
 }
 
