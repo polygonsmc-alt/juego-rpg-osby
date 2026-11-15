@@ -142,6 +142,29 @@ Master no puede enviar avisos. Volver a correrla es seguro.
    suscritos. Sin las llaves, el botón no se ve y los comunicados se
    publican igual, sin avisos.
 
+## Versión de pruebas (staging) — rama `pruebas`
+
+La versión final vive en `main` y se publica en
+`https://juego-rpg-osby.vercel.app/`. Para probar cambios sin tocarla:
+
+1. Los cambios se suben a la rama `pruebas`. Cada push ahí genera un
+   **preview** en Vercel con su propio link (algo como
+   `https://juego-rpg-osby-git-pruebas-osby.vercel.app/`; el link
+   exacto sale en Vercel > Deployments, en la fila del preview).
+2. El preview usa su **propia base de Supabase** (proyecto aparte,
+   `juego-rpg-pruebas`, con las migraciones 0001 a 0005 corridas), así
+   probar no mueve los puntos reales. En Vercel > Settings >
+   Environment Variables, las llaves de Supabase van por ambiente:
+   las reales solo en **Production**, las de pruebas solo en
+   **Preview**. `MASTER_PIN` puede ser el mismo en los dos.
+3. Cuando el cambio ya quedó bien en el preview, se fusiona `pruebas`
+   a `main` (Pull Request en GitHub) y Vercel publica la versión
+   final sola, sin Redeploy manual.
+
+Ojo: si las variables de Supabase siguen en "All Environments", el
+preview usa la base real. Antes de probar movimientos de puntos en
+el preview, separa las variables por ambiente como en el paso 2.
+
 ## Proteger el Master con PIN
 
 El Panel Master (`/master`) pide un PIN de 4 a 6 dígitos. La Carrera (`/`)
