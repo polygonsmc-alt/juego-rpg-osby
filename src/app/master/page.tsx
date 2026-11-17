@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { ACTIONS, PENALTIES, COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, THEMES, AVATAR_NAMES, levelFor, isPunctualityAction, isPunctualityPenalty, isPunctualityPrize, punctualityBonusesAvailable, PUNCTUALITY_PRIZE_COST, linkedPrizeForAction, exclusivePrizeInfo, unitsAvailable } from "@/lib/data";
+import { ACTIONS, PENALTIES, COLLABORATORS_SEED, PRIZES_SEED, MERLIN_SEED, CORVO_SEED, SETTINGS_SEED, THEMES, AVATAR_NAMES, levelFor, isPunctualityPenalty, isPunctualityPrize, punctualityBonusesAvailable, PUNCTUALITY_PRIZE_COST, linkedPrizeForAction, exclusivePrizeInfo, unitsAvailable } from "@/lib/data";
 import type { GameState, Collaborator, PointEvent, ActionType, PenaltyType, CollaboratorBag, SocialPost, SocialJoya } from "@/lib/types";
 import { awardPoints, deductPoints, directRedeem, undoEvent, testConnection, resolveRedemption, addPrize, updatePrize, removePrize, publishAnnouncement, toggleAnnouncementAction, deleteAnnouncementAction, saveCompanyAction, saveAppearanceAction, addActionType, updateActionType, removeActionType, addCollaborator, updateCollaborator, removeCollaborator, addPenaltyType, updatePenaltyType, removePenaltyType, setCompanyLogo, removeCompanyLogo, getPushSubscriberCount, sendTestPush, deleteSocialPost, deleteSocialJoya } from "@/lib/actions";
 import { logoutPin } from "@/lib/auth";
@@ -815,7 +815,7 @@ export default function Master() {
           <p className="mt-4 text-sm font-semibold text-[var(--text)]">¿Qué hizo?</p>
           <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
             {actions.map((a) => {
-              const linkedId = linkedPrizeForAction(a, state.prizes);
+              const linkedId = linkedPrizeForAction(a);
               const linkedName = linkedId != null ? state.prizes.find((p) => p.id === linkedId)?.name : null;
               return (
               <button key={a.id} type="button" disabled={!collab || busy} aria-label={`Sumar ${a.points} puntos por ${a.label}`} onClick={() => doAward(a)} className="flex min-h-12 items-center justify-between gap-2 rounded-md border-2 border-[var(--border)] bg-[var(--surface-alt)] px-3 py-2 text-left disabled:opacity-40">
@@ -893,7 +893,7 @@ export default function Master() {
         {/* Acciones y puntos — como el Master: editar, agregar y eliminar acciones */}
         <section aria-label="Acciones que dan puntos" className="panel p-4 sm:p-5">
           <h2 className="font-pixel text-sm text-[var(--text)]">ACCIONES Y PUNTOS</h2>
-          <p className="mt-2 text-sm text-[var(--dim)]">Estas son las acciones que aparecen en SUMAR PUNTOS. Si cambias los puntos de una acción, el botón de SUMAR PUNTOS ya suma el valor nuevo. Las marcadas <strong className="text-[var(--text)]">PUNTUALIDAD</strong> también suman al sub-saldo de puntualidad del colaborador (check-in, semana sin faltas, mes perfecto o cualquier acción ligada al BONO DE PUNTUALIDAD): solo con ese sub-saldo se canjea el BONO DE PUNTUALIDAD. Con <strong className="text-[var(--text)]">Premio ligado</strong> haces lo mismo con cualquier acción y premio: sus puntos suman al total y también a la bolsa de ese premio, y solo con esa bolsa se puede canjear ese premio. Si no se canjea, esos puntos se quedan y suman para los premios generales.</p>
+          <p className="mt-2 text-sm text-[var(--dim)]">Estas son las acciones que aparecen en SUMAR PUNTOS. Si cambias los puntos de una acción, el botón de SUMAR PUNTOS ya suma el valor nuevo. Las marcadas <strong className="text-[var(--text)]">PUNTUALIDAD</strong> son las ligadas al BONO DE PUNTUALIDAD: también suman al sub-saldo de puntualidad del colaborador y solo con ese sub-saldo se canjea el BONO DE PUNTUALIDAD. Con <strong className="text-[var(--text)]">Premio ligado</strong> haces lo mismo con cualquier acción y premio: sus puntos suman al total y también a la bolsa de ese premio, y solo con esa bolsa se puede canjear ese premio. Si no se canjea, esos puntos se quedan y suman para los premios generales. El nombre de la acción no importa: sin Premio ligado, una acción llamada "check in" o "puntualidad" es normal y suma solo al total.</p>
           <ul className="mt-3 flex flex-col divide-y divide-[var(--border)]">
             {actions.map((a) => (
               <li key={a.id} className="py-2.5">
@@ -916,11 +916,11 @@ export default function Master() {
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
                       <p className="min-w-0 flex-1 text-sm text-[var(--text)]">{a.label}</p>
-                      {(() => { const lid = linkedPrizeForAction(a, state.prizes); const lname = lid != null ? state.prizes.find((p) => p.id === lid)?.name : null; const isPunt = isPunctualityAction(a.id, a.label) || (lname != null && isPunctualityPrize(lname)); if (isPunt) return <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>PUNTUALIDAD</span>; if (lname) return <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>🔒 {lname}</span>; return null; })()}
+                      {(() => { const lid = linkedPrizeForAction(a); const lname = lid != null ? state.prizes.find((p) => p.id === lid)?.name : null; const isPunt = lname != null && isPunctualityPrize(lname); if (isPunt) return <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>PUNTUALIDAD</span>; if (lname) return <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>🔒 {lname}</span>; return null; })()}
                     </div>
                     <div className="flex shrink-0 items-center gap-2 max-sm:basis-full">
                       <span className="font-pixel text-[11px] text-[var(--green)]">+{fmt(a.points)}</span>
-                      <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar acción ${a.label}`} onClick={() => { setEditingAction(a.id); setEditActionName(a.label); setEditActionPoints(String(a.points)); setEditActionLinked(linkedPrizeForAction(a, state.prizes) != null ? String(linkedPrizeForAction(a, state.prizes)) : ""); }}>Editar</button>
+                      <button type="button" className="rounded-md border-2 border-[var(--border)] px-3 py-1 text-xs font-bold text-[var(--text)]" aria-label={`Editar acción ${a.label}`} onClick={() => { setEditingAction(a.id); setEditActionName(a.label); setEditActionPoints(String(a.points)); setEditActionLinked(linkedPrizeForAction(a) != null ? String(linkedPrizeForAction(a)) : ""); }}>Editar</button>
                       <button type="button" className={btnDanger} disabled={busy} aria-label={`Eliminar acción ${a.label}`} onClick={() => doRemoveAction(a.id, a.label)}>Eliminar</button>
                     </div>
                   </div>

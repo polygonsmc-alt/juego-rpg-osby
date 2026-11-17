@@ -16,9 +16,11 @@ nivel Novato, empatados.
   cantidad × costo, stock baja por cantidad), solicitudes pendientes,
   stock con steppers −/+, empresa / logo, tema y temporada.
 - **Sub-saldo de puntualidad** — cada colaborador tiene, además de sus
-  puntos totales, sus puntos de puntualidad: solo lo ganado con check-in
-  puntual, semana sin faltas y mes perfecto. Retardo y Falta injustificada
-  también restan de ahí. El **BONO DE PUNTUALIDAD** (500 pts, stock 100)
+  puntos totales, sus puntos de puntualidad: solo lo ganado con acciones
+  ligadas al BONO DE PUNTUALIDAD en ACCIONES Y PUNTOS → Premio ligado.
+  El nombre de la acción no importa: sin ligado, una acción llamada
+  "check in" o "puntualidad" es normal y suma solo al total. Retardo y
+  Falta injustificada también restan de ahí. El **BONO DE PUNTUALIDAD** (500 pts, stock 100)
   solo se canjea con ese sub-saldo: si pide 3 bonos y solo tiene 1,000 pts
   de puntualidad, el Master muestra `NO CUMPLES CON LOS REQUERIMIENTOS
   PARA CANJEAR 3 BONOS, solo cuentas con 1000 puntos que sí puedes canjear

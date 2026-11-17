@@ -48,13 +48,13 @@ export const PUNCTUALITY_PRIZE_NAME = "BONO DE PUNTUALIDAD";
 export const PUNCTUALITY_PRIZE_COST = 500; // 500 pts de puntualidad = 1 bono ($500)
 
 // --- Sub-saldo de puntualidad ---
-// Qué acciones suman a punctuality_points (además de al saldo total):
-// solo las de puntualidad. Se detectan por NOMBRE (así, si Osbed agrega
-// desde ACCIONES Y PUNTOS una acción llamada "Mes perfecto...", también
-// suma) y, por si se renombra una acción del seed, por su id del seed:
-// 3 = Semana sin faltas ni retardos, 12 = Check-in puntual.
-// NO se inventan otras: ventas, leads y entregas suman solo al total.
-export const PUNCTUALITY_ACTION_IDS = [3, 12];
+// REGLA (2026-11-17, pedido de Osbed): SOLO el "Premio ligado" decide
+// la bolsa de una acción. El nombre ya NO influye: una acción llamada
+// "CHECK IN" o "PUNTUALIDAD" sin premio ligado es una acción normal
+// (suma solo al total, sin chip y sin bolsa). Para que alimente el
+// BONO DE PUNTUALIDAD hay que ligarla a ese premio en ACCIONES Y
+// PUNTOS → Premio ligado. Las acciones del seed 3 y 12 ya vienen
+// ligadas al BONO (linked_prize_id 7), así que siguen funcionando.
 function normLabel(s: string): string {
   return s
     .toLowerCase()
@@ -63,16 +63,6 @@ function normLabel(s: string): string {
     .replace(/[-_]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-export function isPunctualityAction(actionId: number | null, label: string): boolean {
-  if (actionId != null && PUNCTUALITY_ACTION_IDS.includes(actionId)) return true;
-  const n = normLabel(label);
-  // Nombres nuevos de Osbed (2026-11-13 noche): "check in" a secas y
-  // "Puntualidad perfecta | Mes" no contenían "check in puntual" ni
-  // "mes perfecto", así que no se detectaban como puntualidad: ni el
-  // chip PUNTUALIDAD ni el sub-saldo. "check in" cubre "check in
-  // puntual"; "puntualidad" cubre cualquier variante con esa palabra.
-  return n.includes("check in") || n.includes("semana sin faltas") || n.includes("mes perfecto") || n.includes("puntualidad");
 }
 // Qué faltas restan de punctuality_points (además de del saldo total):
 // Retardo y Falta injustificada. "No reportar avance / falta de
@@ -101,22 +91,17 @@ export function punctualityBonusesAvailable(punctualityPoints: number, cost: num
 // La puntualidad es la primera bolsa: acciones 3 y 12 ligadas al BONO
 // DE PUNTUALIDAD (id 7 en el seed). Su saldo vive en
 // collaborators.punctuality_points, no en collaborator_bags.
-// Premio ligado de una acción: el guardado en la base (linked_prize_id)
-// y, por compatibilidad con lo anterior, el bono de puntualidad para
-// las acciones de puntualidad aunque aún no tengan el ligado guardado.
-export function linkedPrizeForAction(action: ActionType | null | undefined, prizes: Prize[]): number | null {
+// Premio ligado de una acción: SOLO el guardado en la base
+// (linked_prize_id). Sin ligado no hay bolsa, aunque el nombre de la
+// acción diga "check in" o "puntualidad" (regla 2026-11-17).
+export function linkedPrizeForAction(action: ActionType | null | undefined): number | null {
   if (!action) return null;
-  if (action.linked_prize_id != null) return action.linked_prize_id;
-  if (isPunctualityAction(action.id, action.label)) {
-    const bono = prizes.find((p) => isPunctualityPrize(p.name));
-    return bono ? bono.id : null;
-  }
-  return null;
+  return action.linked_prize_id ?? null;
 }
 // ¿Este premio es exclusivo? Lo es si alguna acción está ligada a él
 // (o si es el BONO DE PUNTUALIDAD, ligado a las acciones de puntualidad).
 export function exclusivePrizeInfo(prize: Prize, actions: ActionType[], prizes: Prize[]): { exclusive: boolean; actionLabels: string[] } {
-  const labels = actions.filter((a) => linkedPrizeForAction(a, prizes) === prize.id).map((a) => a.label);
+  const labels = actions.filter((a) => linkedPrizeForAction(a) === prize.id).map((a) => a.label);
   return { exclusive: labels.length > 0, actionLabels: labels };
 }
 // Cuántas unidades de un premio alcanzan con una bolsa.

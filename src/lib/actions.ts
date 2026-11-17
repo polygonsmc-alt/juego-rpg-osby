@@ -2,7 +2,7 @@
 import webpush from "web-push";
 import { supabaseAdmin, isSupabaseConfigured } from "./supabase";
 import { isMasterAuthenticated } from "./auth";
-import { bestBonus, isPunctualityAction, isPunctualityPenalty, isPunctualityPrize, linkedPrizeForAction, exclusivePrizeInfo, exclusiveShortfallMessage, mexicoCityDate, mexicoCityWeekMonday } from "./data";
+import { bestBonus, isPunctualityPenalty, isPunctualityPrize, linkedPrizeForAction, exclusivePrizeInfo, exclusiveShortfallMessage, mexicoCityDate, mexicoCityWeekMonday } from "./data";
 import type { Announcement, ActionType, Prize } from "./types";
 
 // Mensaje exacto que pide Osbed cuando no alcanzan los puntos de
@@ -262,22 +262,19 @@ export async function awardPoints(collaboratorId: number, actionId: number, labe
     const balances = await getBalances(db, collaboratorId);
     if (!balances) return { ok: false as const, error: "colaborador no encontrado" };
     const newPoints = balances.points + total;
-    // Bolsa exclusiva: si la acción está ligada a un premio (o es de
-    // puntualidad), el mismo monto suma a la bolsa de ese premio.
-    // Se calcula ANTES del sub-saldo: una acción con nombre nuevo
-    // ligada al BONO DE PUNTUALIDAD (ej. "check in", "Puntualidad
-    // perfecta | Mes") también es de puntualidad aunque su nombre no
-    // esté en la lista vieja; sin esto su bolsa no crecía.
+    // Bolsa exclusiva: si la acción está ligada a un premio, el mismo
+    // monto suma a la bolsa de ese premio. Solo el ligado decide:
+    // el nombre de la acción ya no influye (regla 2026-11-17).
     let linkedPrizeId: number | null = null;
     let bonoPrizeId: number | null = null;
     if (actionId) {
-      const prizes = dbErr(await db.from("prizes").select("*").order("id")) as Prize[];
       const actionRow = dbErr(await db.from("action_types").select("*").eq("id", actionId).maybeSingle()) as ActionType | null;
       bonoPrizeId = await getBonoPrizeId(db);
-      linkedPrizeId = linkedPrizeForAction(actionRow ?? { id: actionId, label, points: basePoints, linked_prize_id: null }, prizes);
+      linkedPrizeId = linkedPrizeForAction(actionRow ?? { id: actionId, label, points: basePoints, linked_prize_id: null });
     }
-    // Acción de puntualidad: el mismo monto suma también al sub-saldo.
-    const punctualityDelta = (isPunctualityAction(actionId || null, label) || (linkedPrizeId != null && linkedPrizeId === bonoPrizeId)) ? total : 0;
+    // Acción ligada al BONO DE PUNTUALIDAD: el mismo monto suma
+    // también al sub-saldo de puntualidad.
+    const punctualityDelta = (linkedPrizeId != null && linkedPrizeId === bonoPrizeId) ? total : 0;
     const newPunctualityPoints = Math.max(0, Math.min(newPoints, balances.punctualityPoints + punctualityDelta));
     let bagAfter = 0;
     if (actionId && linkedPrizeId != null) {
@@ -472,7 +469,7 @@ export async function undoEvent(eventId: number) {
       const delta = parsed ? parsed.delta : (ev.points as number);
       if (prizeId == null) {
         const act = actions.find((a) => a.label === (ev.label as string));
-        prizeId = act ? linkedPrizeForAction(act, prizes) : (isPunctualityAction(null, ev.label as string) ? bonoPrizeId : null);
+        prizeId = act ? linkedPrizeForAction(act) : null;
       }
       if (prizeId != null) bagAfter[prizeId] = Math.max(0, (bags[prizeId] ?? 0) - delta);
     } else if (ev.kind === "penalty") {
