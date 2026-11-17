@@ -916,7 +916,7 @@ export default function Master() {
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
                       <p className="min-w-0 flex-1 text-sm text-[var(--text)]">{a.label}</p>
-                      {(() => { const lid = linkedPrizeForAction(a); const lname = lid != null ? state.prizes.find((p) => p.id === lid)?.name : null; const isPunt = lname != null && isPunctualityPrize(lname); if (isPunt) return <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>PUNTUALIDAD</span>; if (lname) return <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>🔒 {lname}</span>; return null; })()}
+                      {(() => { const lid = linkedPrizeForAction(a); const lname = lid != null ? state.prizes.find((p) => p.id === lid)?.name : null; const isPunt = lname != null && isPunctualityPrize(lname); if (isPunt) return <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>🔒 PUNTUALIDAD</span>; if (lname) return <span className="chip shrink-0 px-2 py-0.5 text-[10px] font-bold" style={{ color: "var(--accent)", borderColor: "var(--accent)" }}>🔒 {lname}</span>; return null; })()}
                     </div>
                     <div className="flex shrink-0 items-center gap-2 max-sm:basis-full">
                       <span className="font-pixel text-[11px] text-[var(--green)]">+{fmt(a.points)}</span>
